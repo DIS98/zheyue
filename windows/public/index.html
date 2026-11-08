@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Clash Deck</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="logo">
+      <span class="mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 17l5-5 4 3 7-8" /><path d="M15 7h5v5" />
+        </svg>
+      </span>
+      <div>
+        <b>Clash Deck</b>
+        <em>LOCAL CONSOLE</em>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button data-page="overview" class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+        概览
+      </button>
+      <button data-page="proxies">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M19 5l-3 3M8 16l-3 3"/></svg>
+        代理
+        <span class="badge" id="navGroups">0</span>
+      </button>
+      <button data-page="conns">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12h8M12 8v8"/><circle cx="12" cy="12" r="9"/></svg>
+        连接
+        <span class="badge" id="navConns">0</span>
+      </button>
+      <button data-page="rules">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="17" r="3"/></svg>
+        规则
+      </button>
+      <button data-page="profiles">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/></svg>
+        配置
+      </button>
+      <button data-page="logs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 10h16M4 15h11M4 20h7"/></svg>
+        日志
+      </button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="status-card">
+        <div class="status-row"><span class="pip" id="pipCore"></span><span id="coreState">内核未启动</span></div>
+        <div class="status-row"><span id="coreMeta">—</span></div>
+      </div>
+      <button class="theme-btn" id="btnTheme">
+        <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <span id="themeLabel">浅色</span>
+      </button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <select class="select" id="profileSel" title="当前配置"></select>
+      <div class="seg" id="modeSeg">
+        <button data-mode="rule" class="active">规则</button>
+        <button data-mode="global">全局</button>
+        <button data-mode="direct">直连</button>
+      </div>
+      <div class="grow"></div>
+      <div class="speeds">
+        <span class="speed"><span style="color:var(--accent)">↓</span><b id="downSpeed">0 B/s</b></span>
+        <span class="speed"><span style="color:var(--warn)">↑</span><b id="upSpeed">0 B/s</b></span>
+        <span class="speed"><b id="connCount">0</b><span>连接</span></span>
+      </div>
+      <button class="btn" id="btnRestart" title="重启内核">重启</button>
+      <button class="btn primary" id="btnToggle">启动</button>
+    </header>
+
+    <div class="content">
+
+      <!-- 概览 -->
+      <section class="page active" id="page-overview">
+        <div class="hero">
+          <div class="card traffic-card">
+            <div class="traffic-nums">
+              <div class="tnum down">
+                <div class="lab">下行</div>
+                <div class="val" id="tDown">0 B/s</div>
+                <div class="tot" id="tDownTotal">累计 0 B</div>
+              </div>
+              <div class="tnum up">
+                <div class="lab">上行</div>
+                <div class="val" id="tUp">0 B/s</div>
+                <div class="tot" id="tUpTotal">累计 0 B</div>
+              </div>
+            </div>
+            <canvas id="chart"></canvas>
+            <div class="chart-tip" id="chartTip"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-h"><h3>接管方式</h3><span class="sub" id="adminHint"></span></div>
+            <div class="card-b">
+              <div class="switch-row">
+                <div>
+                  <div class="lab">系统代理</div>
+                  <div class="hint" id="sysProxyHint">未开启</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="swSysProxy" /><i></i></label>
+              </div>
+              <div class="switch-row">
+                <div>
+                  <div class="lab">TUN 模式</div>
+                  <div class="hint" id="tunHint">需要管理员，改后重启内核</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="swTun" /><i></i></label>
+              </div>
+              <div class="switch-row">
+                <div>
+                  <div class="lab">开机自启</div>
+                  <div class="hint">登录后静默启动，托盘常驻</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="swAutostart" /><i></i></label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid k3" style="margin-bottom:14px">
+          <div class="card">
+            <div class="card-h"><h3>内核</h3></div>
+            <div class="card-b"><div class="kv" id="ovCore">—</div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><h3>当前配置</h3></div>
+            <div class="card-b"><div class="kv" id="ovProfile">—</div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><h3>流量统计</h3><div class="grow"></div><span class="sub" id="usageTip"></span></div>
+            <div class="card-b">
+              <div class="kv" id="ovUsage">—</div>
+              <div class="usage-bars" id="usageBars"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">
+            <h3>主策略组</h3>
+            <div class="grow"></div>
+            <button class="btn sm" id="btnQuickDelay">批量测速</button>
+          </div>
+          <div class="card-b" style="padding:10px">
+            <div class="groups" id="ovGroups"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 代理 -->
+      <section class="page" id="page-proxies">
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-h">
+            <h3>策略组</h3>
+            <span class="sub" id="proxyTip"></span>
+            <div class="grow"></div>
+            <div class="toolbar">
+              <div class="search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                <input id="nodeSearch" placeholder="过滤节点（支持多个关键字，空格分隔）" />
+              </div>
+              <select class="select" id="nodeSort">
+                <option value="delay">延迟：快→慢</option>
+                <option value="delay-desc">延迟：慢→快</option>
+                <option value="name">名称</option>
+                <option value="origin">原始顺序</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="groups" id="allGroups"></div>
+      </section>
+
+      <!-- 连接 -->
+      <section class="page" id="page-conns">
+        <div class="card">
+          <div class="card-h">
+            <h3>活动连接</h3>
+            <span class="sub" id="connTip"></span>
+            <div class="grow"></div>
+            <div class="toolbar">
+              <div class="search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                <input id="connSearch" placeholder="过滤主机 / 进程 / 规则" />
+              </div>
+              <div class="seg" id="connView">
+                <button data-view="list" class="active">单条</button>
+                <button data-view="process">按进程</button>
+              </div>
+              <button class="btn sm danger" id="btnCloseAll">全部断开</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead id="connHead"><tr><th>主机</th><th>链路</th><th>规则</th><th class="num">上传</th><th class="num">下载</th><th>进程</th></tr></thead>
+              <tbody id="connBody"><tr><td colspan="6" class="skel">等待数据…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 规则 -->
+      <section class="page" id="page-rules">
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-h">
+            <h3>规则预判</h3>
+            <span class="sub">输入域名，让内核真实连一次，读出实际命中的规则与最终节点</span>
+          </div>
+          <div class="card-b">
+            <div class="row">
+              <div class="field grow"><label>域名</label><input id="diagHost" placeholder="www.google.com" spellcheck="false" /></div>
+              <button class="btn primary" id="btnDiagnose">预判</button>
+            </div>
+            <div id="diagResult" style="margin-top:10px"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">
+            <h3>规则</h3>
+            <span class="sub" id="ruleTip"></span>
+            <div class="grow"></div>
+            <div class="toolbar">
+              <div class="search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                <input id="ruleSearch" placeholder="过滤规则内容" />
+              </div>
+              <select class="select" id="ruleSort">
+                <option value="hit">按命中次数</option>
+                <option value="order">按配置顺序</option>
+              </select>
+              <button class="btn sm" id="btnRefreshRules">刷新</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>#</th><th>类型</th><th>内容</th><th>策略</th><th>命中分布</th><th class="num">命中</th></tr></thead>
+              <tbody id="ruleBody"><tr><td colspan="6" class="skel">等待数据…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">
+            <h3>规则集（rule-providers）</h3>
+            <span class="sub" id="rpTip"></span>
+            <div class="grow"></div>
+            <button class="btn sm" id="btnRefreshProviders">刷新</button>
+            <button class="btn sm primary" id="btnUpdateAllProviders">全部更新</button>
+          </div>
+          <div class="table-wrap" style="max-height:360px">
+            <table>
+              <thead><tr><th>名称</th><th>类型</th><th class="num">规则数</th><th>更新时间</th><th>操作</th></tr></thead>
+              <tbody id="rpBody"><tr><td colspan="5" class="skel">内核运行后显示</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 配置 -->
+      <section class="page" id="page-profiles">
+        <div class="card">
+          <div class="card-h"><h3>配置文件</h3><span class="sub" id="profileTip"></span></div>
+          <div class="card-b"><div class="plist" id="profileList"></div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><h3>导入订阅</h3></div>
+          <div class="card-b">
+            <div class="row">
+              <div class="field grow"><label>名称（可留空）</label><input id="subName" placeholder="给这份订阅起个名" /></div>
+              <div class="field grow" style="flex:2"><label>订阅地址</label><input id="subUrl" placeholder="https://…" /></div>
+              <div class="field"><label>自动更新</label>
+                <select id="subInterval">
+                  <option value="0">不自动</option>
+                  <option value="6">6 小时</option>
+                  <option value="12">12 小时</option>
+                  <option value="24">24 小时</option>
+                  <option value="72">3 天</option>
+                </select>
+              </div>
+              <button class="btn primary" id="btnFetch">拉取</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><h3>测速</h3><div class="grow"></div><span class="sub" id="testUrlSaved"></span><button class="btn sm primary" id="btnSaveTest">保存</button></div>
+          <div class="card-b">
+            <div class="form-2">
+              <div class="field" style="grid-column: span 2">
+                <label>测速地址（延迟以它为准）</label>
+                <input id="setTestUrl" placeholder="https://www.gstatic.com/generate_204" spellcheck="false" />
+              </div>
+              <div class="field">
+                <label>超时（毫秒，1000–30000）</label>
+                <input id="setDelayTimeout" type="number" min="1000" max="30000" step="500" />
+              </div>
+              <div class="field">
+                <label>定时自动测速</label>
+                <select id="setAutoDelay">
+                  <option value="0">不自动</option>
+                  <option value="5">每 5 分钟</option>
+                  <option value="15">每 15 分钟</option>
+                  <option value="30">每 30 分钟</option>
+                  <option value="60">每 1 小时</option>
+                </select>
+              </div>
+            </div>
+            <div class="row" style="margin-top:10px;flex-wrap:wrap;align-items:center">
+              <span style="font-size:11.5px;color:var(--text-3)">常用：</span>
+              <button class="btn sm" data-preset="https://www.gstatic.com/generate_204">gstatic 204</button>
+              <button class="btn sm" data-preset="https://www.google.com/generate_204">google 204</button>
+              <button class="btn sm" data-preset="https://cp.cloudflare.com/generate_204">cloudflare 204</button>
+              <button class="btn sm" data-preset="http://connectivitycheck.platform.hicloud.com/generate_204">华为 204</button>
+              <button class="btn sm" data-preset="https://www.baidu.com">百度首页</button>
+            </div>
+            <p style="margin:10px 0 0;font-size:11px;color:var(--text-3)">
+              建议用返回 204 的空页面：体积最小、不受页面内容影响。改完立即生效，不用重启内核，下一次测速就用新地址。
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><h3>内核与端口</h3><div class="grow"></div><button class="btn sm primary" id="btnSaveSettings">保存</button></div>
+          <div class="card-b">
+            <div class="form-2">
+              <div class="field"><label>内核路径</label><input id="setCore" /></div>
+              <div class="field"><label>混合端口</label><input id="setMixed" type="number" /></div>
+              <div class="field"><label>控制端口</label><input id="setCtrl" type="number" /></div>
+              <div class="field"><label>面板端口（需重启应用）</label><input id="setWeb" type="number" /></div>
+            </div>
+            <div style="margin-top:6px">
+              <div class="switch-row">
+                <div>
+                  <div class="lab">启动时自动运行内核</div>
+                  <div class="hint">应用一起来就把内核拉起来，不用手动点「启动」</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="swAutoCore" /><i></i></label>
+              </div>
+              <div class="switch-row">
+                <div>
+                  <div class="lab">启动时自动开系统代理</div>
+                  <div class="hint">依赖上一项；关掉应用里停内核时会自动关代理，不会断网</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="swAutoProxy" /><i></i></label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-h">
+            <h3>备份 / 合并</h3>
+            <div class="grow"></div>
+            <span class="sub" id="mergeTip"></span>
+          </div>
+          <div class="card-b">
+            <div class="row" style="flex-wrap:wrap">
+              <button class="btn" id="btnBackup">导出备份</button>
+              <button class="btn" id="btnRestorePick">导入备份</button>
+              <input type="file" id="fileRestore" accept=".json" style="display:none" />
+              <span class="muted" style="font-size:11.5px">备份包含全部配置、订阅来源与设置项，换机器直接导入即可</span>
+            </div>
+            <div class="hr"></div>
+            <div class="form-2">
+              <div class="field"><label>合并基础（提供规则与组结构）</label><select id="mergeBase"></select></div>
+              <div class="field"><label>合并结果名称</label><input id="mergeName" placeholder="合并配置" /></div>
+            </div>
+            <div class="field" style="margin-top:12px">
+              <label>要合进来的订阅（可多选，只能选订阅导入的配置）</label>
+              <div class="chk-list" id="mergeExtras"></div>
+            </div>
+            <div class="row" style="margin-top:12px">
+              <button class="btn primary" id="btnMerge">生成合并配置</button>
+              <span class="muted" style="font-size:11.5px">生成后会先用内核做配置校验，不通过就不写入</span>
+            </div>
+            <div id="mergeResult" style="margin-top:10px"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><h3>粘贴 YAML</h3></div>
+          <div class="card-b">
+            <div class="field"><textarea id="yamlText" placeholder="把完整配置粘贴进来（需含 proxies 或 proxy-providers）"></textarea></div>
+            <div class="row" style="margin-top:10px">
+              <div class="field grow"><label>保存为</label><input id="yamlName" placeholder="文件名" /></div>
+              <button class="btn primary" id="btnSaveYaml">保存</button>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- 日志 -->
+      <section class="page" id="page-logs">
+        <div class="card">
+          <div class="card-h">
+            <h3>内核日志</h3>
+            <div class="grow"></div>
+            <div class="toolbar">
+              <div class="search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                <input id="logSearch" placeholder="过滤关键字（支持多个）" />
+              </div>
+              <select class="select" id="logLevel">
+                <option value="all">全部</option>
+                <option value="info">只看 info</option>
+                <option value="warn">只看 warn/error</option>
+                <option value="sys">只看面板动作</option>
+              </select>
+              <button class="btn sm" id="btnPauseLog">暂停滚动</button>
+              <button class="btn sm" id="btnClearLog">清空视图</button>
+            </div>
+          </div>
+          <pre class="logbox" id="logBox"></pre>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>

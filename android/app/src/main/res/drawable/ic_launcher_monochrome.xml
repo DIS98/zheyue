@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 13+ 主题图标（Material You）：系统只取 alpha 并重新着色。
+     用 fill 而不是 stroke —— 与通知小图标同一原因：描边在"取剪影"路径上可能渲染成空图。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 第一个箭头 -->
+    <path
+        android:pathData="M41,33 L57.5,54 L41,75 L48,54 Z"
+        android:fillColor="#FFFFFFFF" />
+
+    <!-- 第二个箭头 -->
+    <path
+        android:pathData="M56,33 L72.5,54 L56,75 L63,54 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

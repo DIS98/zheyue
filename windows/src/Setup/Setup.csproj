@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- 用 .NET Framework 4.8：Win10 1903+/Win11 系统自带，目标机器不需要装任何运行时 -->
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>ClashDeckSetup</AssemblyName>
+    <RootNamespace>ClashDeckSetup</RootNamespace>
+    <ApplicationIcon>..\assets\clashdeck.ico</ApplicationIcon>
+    <Version>2.6.15</Version>
+    <FileVersion>2.6.15.0</FileVersion>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <NoWarn>CA1416;CS0168;WFO1000;CS0414</NoWarn>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="Microsoft.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\Shared.cs" Link="Shared.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="payload.zip" LogicalName="payload.zip" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,17 @@
+<Application x:Class="ClashDeck.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- [0] 主题色板：运行时整体替换来实现浅/深切换 -->
+                <ResourceDictionary Source="Theme/Light.xaml" />
+                <!-- [1] 控件样式：内部全部用 DynamicResource 引色板，所以换色板即时生效 -->
+                <ResourceDictionary Source="Theme/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <BooleanToVisibilityConverter x:Key="BoolVis" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

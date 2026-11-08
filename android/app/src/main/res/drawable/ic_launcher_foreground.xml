@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    前景标记：一枚「折叠箭头」正穿过一个开口朝右的环。
+    - 环 = 通道/门，开口在右，箭头从缺口穿出，方向感明确
+    - 后一枚箭头压暗，形成纵深，避免被看成普通的"快进"图标
+    环半径 28（含描边 29.6）小于自适应图标 33 的安全半径，圆形遮罩也不会切到。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 门环：缺口朝右（30° 到 330° 的 300° 圆弧），箭头正从缺口穿出 -->
+    <path
+        android:pathData="M78.2,68 A28,28 0 1 1 78.2,40"
+        android:strokeColor="#8C9AA4FF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- 后一枚箭头（退后一层，压暗成"影子箭头"） -->
+    <path
+        android:pathData="M41,36 L55,54 L41,72"
+        android:strokeColor="#7AFFFFFF"
+        android:strokeWidth="9"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- 前一枚箭头：青到靛的渐变，是视觉重心 -->
+    <path
+        android:pathData="M55,36 L69,54 L55,72"
+        android:strokeWidth="9"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="55"
+                android:startY="32"
+                android:endX="70"
+                android:endY="76">
+                <item android:offset="0" android:color="#FF74E4D7" />
+                <item android:offset="1" android:color="#FFB6B8FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

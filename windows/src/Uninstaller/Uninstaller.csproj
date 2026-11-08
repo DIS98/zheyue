@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- 同安装器：net48，系统自带，卸载器不需要任何运行时 -->
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>uninstall</AssemblyName>
+    <RootNamespace>ClashDeckSetup</RootNamespace>
+    <ApplicationIcon>..\assets\clashdeck.ico</ApplicationIcon>
+    <Version>2.6.15</Version>
+    <FileVersion>2.6.15.0</FileVersion>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <NoWarn>CA1416;CS0168;WFO1000;CS0414</NoWarn>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="Microsoft.CSharp" />
+  </ItemGroup>
+
+  <!-- 与安装程序共用同一套卸载实现，避免两份逻辑漂移 -->
+  <ItemGroup>
+    <Compile Include="..\Shared\Shared.cs" Link="Shared.cs" />
+    <Compile Include="..\Setup\Installer.cs" Link="Installer.cs" />
+    <Compile Include="..\Setup\Theme.cs" Link="Theme.cs" />
+    <Compile Include="..\Setup\UninstallForm.cs" Link="UninstallForm.cs" />
+  </ItemGroup>
+
+</Project>

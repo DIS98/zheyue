@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12+ 的备份与迁移规则。
+
+    为什么全部排除：files/ 下存的是订阅原文（含节点密码、机场 token）和运行期配置。
+    一旦进云备份或"换机迁移"，这些凭据就会离开本机——对代理工具来说这是最不该发生的事。
+    本应用也不需要任何形式的备份：订阅可以重新导入。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

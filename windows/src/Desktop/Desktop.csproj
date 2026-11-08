@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+
+    <AssemblyName>ClashDeck</AssemblyName>
+    <RootNamespace>ClashDeck</RootNamespace>
+    <ApplicationIcon>..\assets\clashdeck.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <Version>2.6.15</Version>
+    <FileVersion>2.6.15.0</FileVersion>
+    <AssemblyTitle>折跃</AssemblyTitle>
+    <Product>折跃</Product>
+    <Company>折跃</Company>
+    <Description>本地代理内核控制台</Description>
+
+    <NoWarn>CA1416;CS0168;CS0649</NoWarn>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="assets\logo.png" />
+        <Reference Include="System.Net.Http" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+</Project>

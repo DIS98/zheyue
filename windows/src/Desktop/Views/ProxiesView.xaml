@@ -1,0 +1,164 @@
+<local:PageBase x:Class="ClashDeck.Views.ProxiesView"
+             xmlns:local="clr-namespace:ClashDeck.Views"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:core="clr-namespace:ClashDeck.Core">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 工具条 -->
+        <Border Grid.Row="0" Style="{StaticResource Card}" Padding="13,10" Margin="0,0,0,12">
+            <Grid>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="策略组" Style="{StaticResource H2}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="Tip" Style="{StaticResource Sub}" Margin="10,0,0,0" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Grid Width="230">
+                        <TextBox x:Name="Search" TextChanged="Search_TextChanged" />
+                        <TextBlock x:Name="SearchHint" Text="过滤节点（空格分隔多个关键字）"
+                                   FontSize="12" Foreground="{DynamicResource Fg3}" Margin="11,0,0,0"
+                                   VerticalAlignment="Center" IsHitTestVisible="False" />
+                    </Grid>
+                    <ComboBox x:Name="Sort" Width="152" Margin="8,0,0,0" SelectionChanged="Sort_SelectionChanged">
+                        <ComboBoxItem Content="延迟：快 → 慢" Tag="delay" IsSelected="True" />
+                        <ComboBoxItem Content="延迟：慢 → 快" Tag="delay-desc" />
+                        <ComboBoxItem Content="名称" Tag="name" />
+                        <ComboBoxItem Content="原始顺序" Tag="origin" />
+                    </ComboBox>
+                    <Button Content="全部测速" Style="{StaticResource Btn}" Height="32" Margin="8,0,0,0"
+                            Click="TestAll_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 组列表 -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      Padding="0,0,6,0">
+            <ItemsControl x:Name="GroupList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,12" Padding="14,12">
+                            <StackPanel>
+                                <!-- 组头 -->
+                                <Grid>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" FontSize="13.5" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource Fg}" VerticalAlignment="Center" />
+                                        <Border Style="{StaticResource Pill}" Background="{DynamicResource Panel3}"
+                                                Margin="9,0,0,0" Padding="7,1">
+                                            <TextBlock Text="{Binding TypeText}" FontSize="10"
+                                                       Foreground="{DynamicResource Fg2}" />
+                                        </Border>
+                                        <TextBlock Text="{Binding CountText}" Style="{StaticResource Sub}"
+                                                   Margin="9,0,0,0" />
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <TextBlock Text="{Binding DisplayNow}" FontSize="11.5"
+                                                   Foreground="{DynamicResource Fg2}" VerticalAlignment="Center"
+                                                   MaxWidth="220" TextTrimming="CharacterEllipsis"
+                                                   Margin="0,0,10,0" />
+                                        <Button Content="测速" Style="{StaticResource BtnSm}" Tag="{Binding}"
+                                                Click="GroupTest_Click" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- 节点 -->
+                                <ItemsControl ItemsSource="{Binding Nodes}" Margin="0,9,0,0">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel ItemWidth="216" ItemHeight="28" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border x:Name="row" Background="Transparent" CornerRadius="6"
+                                                    Padding="7,3" Margin="0,1" Cursor="Hand"
+                                                    ToolTip="{Binding Tooltip}" MouseLeftButtonUp="Node_Click">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="14" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <Ellipse x:Name="dot" Width="6" Height="6"
+                                                             Fill="{DynamicResource LineStrong}"
+                                                             VerticalAlignment="Center"
+                                                             HorizontalAlignment="Left" />
+
+                                                    <TextBlock x:Name="nodeName" Grid.Column="1" Text="{Binding DisplayName}"
+                                                               FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               VerticalAlignment="Center" />
+
+                                                    <Border x:Name="lossBadge" Grid.Column="2" CornerRadius="999"
+                                                            Padding="5,0" Margin="0,0,5,0"
+                                                            Background="{DynamicResource BadSoft}"
+                                                            Visibility="{Binding HasLoss, Converter={StaticResource BoolVis}}"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding LossText}" FontSize="9.5"
+                                                                   Foreground="{DynamicResource Bad}" />
+                                                    </Border>
+
+                                                    <Border x:Name="delayBadge" Grid.Column="2" CornerRadius="999"
+                                                            Padding="6,1" Background="{DynamicResource Panel3}"
+                                                            VerticalAlignment="Center" Cursor="Hand"
+                                                            MouseLeftButtonUp="Delay_Click">
+                                                        <TextBlock x:Name="delayText" Text="{Binding DelayText}"
+                                                                   FontSize="10.5"
+                                                                   Foreground="{DynamicResource Fg3}" />
+                                                    </Border>
+                                                </Grid>
+                                            </Border>
+
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter TargetName="row" Property="Background"
+                                                            Value="{DynamicResource AccentSoft}" />
+                                                    <Setter TargetName="dot" Property="Fill"
+                                                            Value="{DynamicResource Accent}" />
+                                                    <Setter TargetName="nodeName" Property="Foreground"
+                                                            Value="{DynamicResource Fg}" />
+                                                    <Setter TargetName="nodeName" Property="FontWeight"
+                                                            Value="SemiBold" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Tier}" Value="{x:Static core:DelayTier.Good}">
+                                                    <Setter TargetName="delayText" Property="Foreground"
+                                                            Value="{DynamicResource Ok}" />
+                                                    <Setter TargetName="delayBadge" Property="Background"
+                                                            Value="{DynamicResource OkSoft}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Tier}" Value="{x:Static core:DelayTier.Mid}">
+                                                    <Setter TargetName="delayText" Property="Foreground"
+                                                            Value="{DynamicResource Warn}" />
+                                                    <Setter TargetName="delayBadge" Property="Background"
+                                                            Value="{DynamicResource WarnSoft}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Tier}" Value="{x:Static core:DelayTier.Bad}">
+                                                    <Setter TargetName="delayText" Property="Foreground"
+                                                            Value="{DynamicResource Bad}" />
+                                                    <Setter TargetName="delayBadge" Property="Background"
+                                                            Value="{DynamicResource BadSoft}" />
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <TextBlock x:Name="EmptyHint" Text="没有匹配的节点" Style="{StaticResource Sub}"
+                                           Visibility="Collapsed" Margin="4,8,0,2" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </Grid>
+</local:PageBase>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知的大图标（彩色版标记）。
+     为什么需要它：ColorOS / HyperOS 这类 ROM 的通知折叠态会把**应用图标**画在左侧，
+     而应用图标在覆盖安装后可能被启动器/通知服务缓存住（显示的仍是上一版）。
+     显式给通知设置 largeIcon 之后，系统会优先用它，不再回退到被缓存的应用图标。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+
+    <!-- 深靛底：与启动图标同色系，圆角方形（多数 ROM 的图标位是 squircle） -->
+    <path
+        android:pathData="M11,2 L37,2 A9,9 0 0,1 46,11 L46,37 A9,9 0 0,1 37,46 L11,46 A9,9 0 0,1 2,37 L2,11 A9,9 0 0,1 11,2 Z"
+        android:fillColor="#4A46C8" />
+
+    <!-- 双折叠箭头：与状态栏小图标、启动图标同一标记 -->
+    <path
+        android:pathData="M18,16 L27,24 L18,32"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M27,16 L36,24 L27,32"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

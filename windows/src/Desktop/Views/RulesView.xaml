@@ -1,0 +1,146 @@
+<local:PageBase x:Class="ClashDeck.Views.RulesView"
+             xmlns:local="clr-namespace:ClashDeck.Views"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,6,0">
+        <StackPanel>
+
+            <!-- 规则预判 -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                <StackPanel>
+                    <Grid>
+                        <TextBlock Style="{StaticResource H2}" Text="规则预判" />
+                        <TextBlock Style="{StaticResource Sub}" HorizontalAlignment="Right"
+                                   Text="让内核真连一次，读它实际命中的规则" />
+                    </Grid>
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid>
+                            <TextBox x:Name="DiagHost" Height="34" TextChanged="DiagHost_TextChanged" />
+                            <TextBlock Text="www.google.com" FontSize="12" Foreground="{DynamicResource Fg3}"
+                                       Margin="11,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                                       x:Name="DiagHint" />
+                        </Grid>
+                        <Button Grid.Column="1" x:Name="BtnDiag" Content="预判" Style="{StaticResource BtnPrimary}"
+                                Height="34" Width="92" Margin="10,0,0,0" Click="Diag_Click" />
+                    </Grid>
+                    <ContentControl x:Name="DiagResult" Margin="0,10,0,0" />
+                </StackPanel>
+            </Border>
+
+
+            <!-- 自定义分流 -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                <StackPanel>
+                    <Grid>
+                        <TextBlock Style="{StaticResource H2}" Text="自定义分流" />
+                        <TextBlock Style="{StaticResource Sub}" HorizontalAlignment="Right"
+                                   Text="内置库覆盖不到的站点在这里指定，优先级高于内置规则" />
+                    </Grid>
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid>
+                            <TextBox x:Name="CustomHost" Height="34" TextChanged="CustomHost_TextChanged" />
+                            <TextBlock Text="example.com" FontSize="12" Foreground="{DynamicResource Fg3}"
+                                       Margin="11,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                                       x:Name="CustomHint" />
+                        </Grid>
+                        <ComboBox x:Name="CustomType" Grid.Column="1" Width="112" Height="34" Margin="8,0,0,0">
+                            <ComboBoxItem Content="域名后缀" Tag="DOMAIN-SUFFIX" IsSelected="True" />
+                            <ComboBoxItem Content="精确域名" Tag="DOMAIN" />
+                            <ComboBoxItem Content="关键词" Tag="DOMAIN-KEYWORD" />
+                        </ComboBox>
+                        <ComboBox x:Name="CustomAction" Grid.Column="2" Width="96" Height="34" Margin="8,0,0,0">
+                            <ComboBoxItem Content="走代理" Tag="proxy" IsSelected="True" />
+                            <ComboBoxItem Content="直连" Tag="direct" />
+                        </ComboBox>
+                        <Button Grid.Column="3" x:Name="BtnAddCustom" Content="添加" Style="{StaticResource BtnPrimary}"
+                                Height="34" Width="72" Margin="8,0,0,0" Click="AddCustom_Click" />
+                    </Grid>
+                    <StackPanel x:Name="CustomList" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+
+            <!-- 规则表 -->
+            <Border Style="{StaticResource Card}" Padding="0" Margin="0,0,0,12">
+                <StackPanel>
+                    <Grid Margin="14,12,14,10">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Style="{StaticResource H2}" Text="规则列表" VerticalAlignment="Center" />
+                            <TextBlock x:Name="RuleTip" Style="{StaticResource Sub}" Margin="10,0,0,0" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Grid Width="200">
+                                <TextBox x:Name="RuleSearch" TextChanged="RuleSearch_TextChanged" />
+                                <TextBlock Text="搜索规则" FontSize="12" Foreground="{DynamicResource Fg3}"
+                                           Margin="11,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                                           x:Name="RuleSearchHint" />
+                            </Grid>
+                            <ComboBox x:Name="RuleSort" Width="140" Margin="8,0,0,0"
+                                      SelectionChanged="RuleSort_SelectionChanged">
+                                <ComboBoxItem Content="按命中排序" Tag="hit" IsSelected="True" />
+                                <ComboBoxItem Content="按原始顺序" Tag="origin" />
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Background="{DynamicResource Panel2}" Padding="14,8"
+                            BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="42" />
+                                <ColumnDefinition Width="86" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="132" />
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="62" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="#" Style="{StaticResource Sub}" />
+                            <TextBlock Grid.Column="1" Text="类型" Style="{StaticResource Sub}" />
+                            <TextBlock Grid.Column="2" Text="内容" Style="{StaticResource Sub}" />
+                            <TextBlock Grid.Column="3" Text="策略" Style="{StaticResource Sub}" />
+                            <TextBlock Grid.Column="4" Text="命中分布" Style="{StaticResource Sub}" />
+                            <TextBlock Grid.Column="5" Text="命中" Style="{StaticResource Sub}"
+                                       HorizontalAlignment="Right" />
+                        </Grid>
+                    </Border>
+
+                    <ScrollViewer MaxHeight="400" VerticalScrollBarVisibility="Auto" Padding="0,0,4,0">
+                        <StackPanel x:Name="RuleHost" />
+                    </ScrollViewer>
+                </StackPanel>
+            </Border>
+
+            <!-- 规则集 -->
+            <Border Style="{StaticResource Card}" Padding="0">
+                <StackPanel>
+                    <Grid Margin="14,12,14,8">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Style="{StaticResource H2}" Text="规则集（rule-providers）"
+                                       VerticalAlignment="Center" />
+                            <TextBlock x:Name="RpTip" Style="{StaticResource Sub}" Margin="10,0,0,0" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Content="刷新" Style="{StaticResource BtnSm}" Height="26" Click="RpRefresh_Click" />
+                            <Button Content="全部更新" Style="{StaticResource BtnSm}" Height="26" Margin="8,0,0,0"
+                                    Click="RpUpdateAll_Click" />
+                        </StackPanel>
+                    </Grid>
+                    <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto" Padding="0,0,4,4">
+                        <StackPanel x:Name="RpHost" Margin="14,0,14,10" />
+                    </ScrollViewer>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</local:PageBase>
