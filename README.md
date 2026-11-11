@@ -56,8 +56,8 @@
 到 Releases 取最新一版。Windows 是单文件离线安装包，Android 是 arm64-v8a 的 APK。
 
 ```text
-Releases → windows-2.6.15 → ClashDeck-Setup-2.6.15-3be1ca69-clean.exe
-Releases → android-2.0.9  → Zheyue-2.0.9-94eab139.apk
+Releases → windows-2.6.17 → ClashDeck-Setup-2.6.17-ced81c17-clean.exe
+Releases → android-2.2.0  → Zheyue-2.2.0-08c4c47a.apk
 ```
 
 ### 2. Windows：安装并启动
@@ -70,7 +70,7 @@ Releases → android-2.0.9  → Zheyue-2.0.9-94eab139.apk
 start-admin.cmd
 
 # 静默安装 / 卸载
-ClashDeck-Setup-2.6.15-3be1ca69-clean.exe --silent
+ClashDeck-Setup-2.6.17-ced81c17-clean.exe --silent
 uninstall.exe --silent
 ```
 
@@ -158,12 +158,12 @@ flowchart LR
 <a id="downloads"></a>
 ## 下载与版本
 
-所有二进制都放在 Releases，不进源码仓库。当前版本：**Windows 2.6.15 / Android 2.0.9**。
+所有二进制都放在 Releases，不进源码仓库。当前版本：**Windows 2.6.17 / Android 2.2.0**。
 
 | 安装包 | 体积 | 说明 | Release |
 | --- | --- | --- | --- |
-| `ClashDeck-Setup-2.6.15-3be1ca69-clean.exe` | 73,308,528 B | Windows 单文件离线安装包，当前用户安装 | [windows-2.6.15](https://github.com/DIS98/zheyue/releases/tag/windows-2.6.15) |
-| `Zheyue-2.0.9-94eab139.apk` | 42,730,944 B | Android arm64-v8a 安装包 | [android-2.0.9](https://github.com/DIS98/zheyue/releases/tag/android-2.0.9) |
+| `ClashDeck-Setup-2.6.17-ced81c17-clean.exe` | 73,317,232 B | Windows 单文件离线安装包，当前用户安装 | [windows-2.6.17](https://github.com/DIS98/zheyue/releases/tag/windows-2.6.17) |
+| `Zheyue-2.2.0-08c4c47a.apk` | 42,749,680 B | Android arm64-v8a 安装包 | [android-2.2.0](https://github.com/DIS98/zheyue/releases/tag/android-2.2.0) |
 
 下载后请核对文件体积；Release 说明里附有校验方式。
 

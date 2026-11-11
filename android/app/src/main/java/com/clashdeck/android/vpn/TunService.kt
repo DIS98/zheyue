@@ -47,6 +47,9 @@ class TunService : VpnService() {
         const val ACTION_START = "com.clashdeck.android.action.START"
         const val ACTION_STOP = "com.clashdeck.android.action.STOP"
 
+        /** 订阅定时刷新：只对已在前台运行的服务投递，不新建服务、不重建 tun。 */
+        const val ACTION_REFRESH_SUBSCRIPTION = "com.clashdeck.android.action.REFRESH_SUBSCRIPTION"
+
         // v3：换图标必须换渠道 id。渠道创建后图标会被系统锁定，改 drawable 不生效。
         private const val CHANNEL_ID = "clashdeck_vpn_v4"
 
@@ -140,6 +143,21 @@ class TunService : VpnService() {
                 requestStop()
                 return START_NOT_STICKY
             }
+            ACTION_REFRESH_SUBSCRIPTION -> {
+                // 已经在跑的服务才能接这个动作：后台 Receiver 无法自己拉起长耗时下载。
+                // 刷新走独立工作线程，绝不碰 doStart/teardown，连接不会因为订阅更新被拆掉。
+                if (established) {
+                    Thread({
+                        kotlinx.coroutines.runBlocking {
+                            com.clashdeck.android.data.SubscriptionAutoUpdate.refresh(
+                                this@TunService,
+                                force = false,
+                            )
+                        }
+                    }, "clashdeck-sub-refresh").apply { isDaemon = true; start() }
+                }
+                return START_NOT_STICKY
+            }
         }
 
         if (established) return START_NOT_STICKY
@@ -212,6 +230,8 @@ class TunService : VpnService() {
             established = true
             startWatchdog?.interrupt()
             CoreManager.markRunning()
+            // 本次启动已用最新订阅原文重建 runtime.yaml，后台挂着的「待重载」到此消费掉。
+            settings.subPendingReload = false
 
             // 启动期间用户点了断开：内核已经起来了，必须立刻回收，
             // 否则会出现"界面未连接、实际流量还在走代理"（隐私级）。

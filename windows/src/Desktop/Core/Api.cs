@@ -136,7 +136,12 @@ namespace ClashDeck.Core
 
         public static Task<JObj> Snapshot() => Get("/api/snapshot", 12000);
         public static Task<JObj> Env() => Get("/api/env", 4000);
-        public static Task<JObj> Logs(long since) => Get("/api/logs?since=" + since, 6000);
+        /// <summary>
+        /// 日志增量。v=2 表示 since 是**单调序号**而不是缓冲下标。
+        /// 老协议下 total 到 600 就饱和，客户端把 total 当游标会永久停更 ——
+        /// 也就是"超过几百行就不再滚动"的那个现象。参数换了才有新语义。
+        /// </summary>
+        public static Task<JObj> Logs(long since) => Get("/api/logs?since=" + since + "&v=2", 6000);
         public static Task<JObj> History(int seconds) => Get("/api/history?seconds=" + seconds, 6000);
         public static Task<JObj> Connections() => Get("/api/connections", 8000);
         public static Task<JObj> Rules(string sort) => Get("/api/rules?sort=" + sort, 20000);
@@ -239,6 +244,8 @@ namespace ClashDeck.Core
         /// <summary>分流规则集是否都加载了。null = 后端还没这个字段（不渲染）。</summary>
         public bool? RulesOk;
         public int RulesOkFail, RulesOkTotal;
+        /// <summary>没加载的规则集名字（逗号分隔），告警条上直接点名。</summary>
+        public string RulesOkEmpty = "";
         /// <summary>严格模式是否真的生效。null = 不适用（智能模式）或后端还没这个字段。</summary>
         public bool? StrictApplied;
         public string StrictNote = "";
@@ -387,7 +394,9 @@ namespace ClashDeck.Core
                     s.Env.RulesOk = Tri(rok, "ok");
                     // 后端实际形状 {ok, empty[], checkedAt}：未加载数量是 empty 的长度，
                     // 不是 fail/total（那两个字段不存在，读它会让文案变成"未加载 0/0"）
-                    s.Env.RulesOkFail = rok.List("empty").Count;
+                    var empties = rok.StrList("empty");
+                    s.Env.RulesOkFail = empties.Count;
+                    s.Env.RulesOkEmpty = string.Join(", ", empties);
                     s.Env.RulesOkTotal = rok.I("total");
                 }
                 else

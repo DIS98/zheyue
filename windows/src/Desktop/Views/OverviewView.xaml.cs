@@ -144,9 +144,15 @@ namespace ClashDeck.Views
             {
                 Banner.Visibility = Visibility.Visible;
                 BannerText.Foreground = (Brush)FindResource("Bad");
+                // 点名是谁没加载：只说"N 个"的话，用户既无法判断严重程度，也无从自己动手
+                var missing = s.Env.RulesOkEmpty;
                 BannerText.Text = "分流规则有 " + s.Env.RulesOkFail + "/" + s.Env.RulesOkTotal
-                                  + " 个没加载，这部分流量可能走错方向。";
-                BannerBtn.Visibility = Visibility.Collapsed;
+                                  + " 个没加载，这部分流量可能走错方向。"
+                                  + (string.IsNullOrEmpty(missing) ? "" : "（" + missing + "）");
+                // 给一条可点出路：补规则集失败大多是那一次网络没通，重试可能就好了
+                BannerBtn.Content = "重试加载";
+                BannerBtn.Visibility = Visibility.Visible;
+                _bannerAction = "rules";
                 return;
             }
             BannerText.Foreground = (Brush)FindResource("Warn");
@@ -155,7 +161,9 @@ namespace ClashDeck.Views
             {
                 Banner.Visibility = Visibility.Visible;
                 BannerText.Text = "还没有激活的配置。导入订阅或粘贴一份 YAML，激活后就能启动内核。";
+                BannerBtn.Content = "去配置";
                 BannerBtn.Visibility = Visibility.Visible;
+                _bannerAction = "profiles";
             }
             else if (s.Env.TunEnable && !s.Env.IsAdmin)
             {
@@ -894,6 +902,36 @@ namespace ClashDeck.Views
             if (!j.B("ok")) _owner.ShowToast(j.S("msg") ?? "切换失败", false);
         }
 
-        private void BannerBtn_Click(object sender, RoutedEventArgs e) => _owner.GoPage("profiles");
+        private void BannerBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (_bannerAction == "rules") { _ = RepairRulesAsync(); return; }
+            _owner.GoPage("profiles");
+        }
+
+        /// <summary>告警条上那个按钮当前代表什么动作（默认"去配置"）。</summary>
+        private string _bannerAction = "profiles";
+
+        /// <summary>
+        /// 重试补规则集。启动时那次是后台跑的，网络那一下没通就失败了；
+        /// 给一个按钮，用户不必重启内核也能再试一次。
+        /// </summary>
+        private async Task RepairRulesAsync()
+        {
+            var old = BannerBtn.Content;
+            BannerBtn.IsEnabled = false;
+            BannerBtn.Content = "重试中…";
+            try
+            {
+                var j = await Api.Post("/api/rules/repair", Json.Obj(), 45000);
+                var ok = j.B("ok");
+                _owner.ShowToast(ok ? "规则集已全部加载" : (j.S("msg") ?? "仍有规则集没加载，详情见日志页"), ok);
+            }
+            catch (Exception ex) { _owner.ShowToast("重试失败：" + ex.Message, false); }
+            finally
+            {
+                BannerBtn.IsEnabled = true;
+                BannerBtn.Content = old ?? "重试加载";
+            }
+        }
     }
 }

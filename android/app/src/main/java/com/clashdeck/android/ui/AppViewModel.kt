@@ -27,6 +27,8 @@ import com.clashdeck.android.data.ProfileInfo
 import com.clashdeck.android.data.ProfileRepo
 import com.clashdeck.android.data.ProviderRepo
 import com.clashdeck.android.data.SettingsRepo
+import com.clashdeck.android.data.SubUpdateState
+import com.clashdeck.android.data.SubscriptionAutoUpdate
 import com.clashdeck.android.data.UpdateInfo
 import com.clashdeck.android.data.UpdateRepo
 import com.clashdeck.android.util.Errors
@@ -102,6 +104,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val testingGroups = MutableStateFlow<Set<String>>(emptySet())
     val apiReady = MutableStateFlow(false)
 
+    /** 订阅自动更新状态。后台刷新写的是 SharedPreferences，界面靠 syncSubStatus 对齐。 */
+    val subState = MutableStateFlow(SubUpdateState())
+    val subBusy = MutableStateFlow(false)
+
     /** 控制接口最后一次失败原因。界面直接展示——"还没读到"这种话说明不了任何问题。 */
     val apiError = MutableStateFlow<String?>(null)
 
@@ -137,6 +143,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         loadProfiles()
+        // 订阅自动更新：进程一起来就重排闹钟，并把后台写进 SP 的结果同步给界面。
+        // 后台只在前台服务宿主存在时下载；没有宿主时留的 pending 在这里补做。
+        SubscriptionAutoUpdate.arm(app)
+        syncSubStatus()
+        val sub = subState.value
+        if (SubscriptionAutoUpdate.isDue(
+                sub.enabled, sub.pending, sub.lastCheckAt, sub.intervalMinutes, System.currentTimeMillis(),
+            )
+        ) {
+            refreshSubscriptions(force = false, silent = true)
+        }
         // 订阅下载优先走本机代理（本应用自身流量被排除在 tun 外，直连机场域名多半会超时）
         repo.coreRunning = { CoreManager.state.value.running }
         providerRepo.coreRunning = { CoreManager.state.value.running }
@@ -630,15 +647,86 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             busy.value = true
             try {
-                val updated = repo.update(profile)
+                val (updated, changed) = repo.update(profile)
                 loadProfiles()
-                toast.value = "已更新：${updated.name}"
-                if (repo.active()?.id == updated.id) restartVpn()
+                toast.value = if (changed) "已更新：${updated.name}" else "内容没有变化：${updated.name}"
+                // 流量头每次都变，节点表可能一个字没改；没变化就不拆正在连的内核。
+                if (changed && repo.active()?.id == updated.id) restartVpn()
             } catch (t: Throwable) {
-                toast.value = "更新失败：${Errors.human(t)}"
+                toast.value = "更新失败：" + com.clashdeck.android.util.DiagLog.redact(Errors.human(t))
             } finally {
                 busy.value = false
             }
+        }
+    }
+
+    // ---------- 订阅自动更新 ----------
+
+    /** 后台刷新写的是 SP，StateFlow 不会自动跟着变；配置页可见时定时调它对齐。 */
+    fun syncSubStatus() {
+        subState.value = SubscriptionAutoUpdate.readState(getApplication())
+    }
+
+    fun setSubAutoEnabled(enabled: Boolean) {
+        settings.subAutoEnabled = enabled
+        if (enabled) {
+            SubscriptionAutoUpdate.arm(getApplication())
+            // 排程没落地就回滚开关，避免界面写着「已开启」却永远不会触发。
+            if (settings.subNextAt <= 0L) {
+                settings.subAutoEnabled = false
+                toast.value = "系统没有可用的闹钟服务，自动更新未开启"
+            }
+        } else {
+            settings.subPending = false
+            SubscriptionAutoUpdate.cancel(getApplication())
+        }
+        syncSubStatus()
+    }
+
+    /** @param minutes 1–10080；越界直接拒绝，不做静默钳制，否则界面显示的数字会和实际排程不一致。 */
+    fun setSubIntervalMinutes(minutes: Int) {
+        if (minutes !in SettingsRepo.SUB_INTERVAL_MIN..SettingsRepo.SUB_INTERVAL_MAX) {
+            toast.value = "间隔要在 ${SettingsRepo.SUB_INTERVAL_MIN}–${SettingsRepo.SUB_INTERVAL_MAX} 分钟之间"
+            return
+        }
+        val old = settings.subIntervalMinutes
+        settings.subIntervalMinutes = minutes
+        SubscriptionAutoUpdate.arm(getApplication())
+        // 排程没落地就不能让界面显示一个并不存在的新间隔。
+        if (settings.subNextAt <= 0L) {
+            settings.subIntervalMinutes = old
+            // 先用旧值重排一次：否则「开关已开启」但下一次闹钟是空的。
+            SubscriptionAutoUpdate.arm(getApplication())
+            if (settings.subNextAt <= 0L) {
+                // 闹钟服务彻底不可用，开关不能悬空。
+                settings.subAutoEnabled = false
+                SubscriptionAutoUpdate.cancel(getApplication())
+            }
+            toast.value = "系统没有可用的闹钟服务，间隔未改动"
+        }
+        syncSubStatus()
+    }
+
+    /** force=true 用于界面上的「立刻检查一次」：不受总开关与退避限制。 */
+    fun refreshSubscriptions(force: Boolean = false, silent: Boolean = false) {
+        if (subBusy.value) return
+        subBusy.value = true
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                SubscriptionAutoUpdate.refresh(getApplication(), force)
+            }
+            loadProfiles()
+            syncSubStatus()
+            if (!silent) {
+                toast.value = when {
+                    result.error != null -> "订阅检查失败：${result.error}"
+                    result.skipped -> "订阅自动更新未开启"
+                    result.changed && !result.reloaded -> "订阅已更新，下次连接生效"
+                    result.changed -> "订阅已更新并生效"
+                    else -> "订阅没有变化"
+                }
+            }
+            subBusy.value = false
         }
     }
 

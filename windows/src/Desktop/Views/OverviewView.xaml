@@ -166,7 +166,8 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="订阅自动更新" FontSize="12.5" Foreground="{DynamicResource Fg}" />
-                                <TextBlock Text="间隔小时数，填 0 表示不自动更新" Style="{StaticResource Sub}" Margin="0,2,0,0" />
+                                <TextBlock Text="间隔小时数，填 0 表示不自动更新" Style="{StaticResource Sub}" Margin="0,2,0,0"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBox x:Name="TxtSubInterval" Width="58" TextAlignment="Center"

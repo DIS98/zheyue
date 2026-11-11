@@ -34,7 +34,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "build")
 STAGE = os.path.join(BUILD, "stage")
 DOTNET = r"./toolchain/"
-VERSION = "2.6.15"
+VERSION = "2.6.17"
 
 # ---- 发布约定（唯一真源 ./
 # 命名 <产品>-<版本>-<sha256 前 8 位>-<形态>.exe：同名不同内容只能靠哈希前缀分辨。
@@ -49,15 +49,17 @@ RELEASE = os.path.join(ROOT, "release-win")
 # 部署目录（操作说明从这里发）。打包完自动同步过去，不靠手拷——
 # 手拷会让两处 sha256 漂移，而页面与清单要逐字一致。
 SHARE_DIR = os.path.join(ROOT, "share")
+# 旧包归档位（契约 1.9：移出交付目录放 _backup，不删）
+ARCHIVE_ROOT = os.environ.get("PKG_ARCHIVE", "./")
 # 契约第 4 条：包与清单一次产出，**打包脚本自带判据**。只打印自检命令等于没有判据，
 # 所以这里真调用，非零退出即整个打包失败——不给人"先出了包再说"的机会。
 # 可用 PKG_CHECK 覆盖，用于换机器或验证"判据真的会拦"。
 CHECK = os.environ.get("PKG_CHECK", r"./")
 NOTES = [
-    "更新通道整体切到分享页：原腾讯云线路已退役，旧版点「检查更新」会连不上服务器",
-    "手动装这一次就恢复自动更新，之后有新版本会正常提示，不用再手动下",
-    "安装包与下载页同源同目录，下载链接不变",
-    "功能与 2.6.14 相同（TUN 分流规则误报的修复沿用），本版只换通道",
+    "日志页工具栏改成两行：上行放标题与按钮，下行放筛选条件，窗口缩到最小时不再有字被切掉",
+    "搜索框随窗口变宽（最窄 200、最宽 420），宽屏下不再在中间留一大片空白",
+    "修掉概览页右侧「接管方式」在窄窗口下撑破卡片、「订阅自动更新」说明文字被硬切",
+    "其余功能与 2.6.16 相同；检查更新照常可用，不需要重新下载安装",
 ]
 
 # 内核来源：项目内 core/（自包含，不再依赖本机其它软件是否安装）
@@ -460,6 +462,20 @@ def sync_page(m):
     log("页面已按清单同步（文件名 %d 处 / 要点 %d 条）" % (s.count(name), len(m["notes"])))
 
 
+def archive_old_packages(paths):
+    """旧包不是垃圾：契约要求移出交付目录、归档到项目外，删了就没法回滚。
+
+    以前这里是 os.remove：2.6.15 那份包因此彻底消失，
+    数据库里那行记录指向一个再也下不到的文件。归档只多占一次磁盘。
+    """
+    day = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    dst_dir = os.path.join(ARCHIVE_ROOT, "clashdeck", day)
+    os.makedirs(dst_dir, exist_ok=True)
+    for p in paths:
+        shutil.move(p, os.path.join(dst_dir, os.path.basename(p)))
+    log("旧包归档 %d 个 → %s" % (len(paths), dst_dir))
+
+
 def sync_share(dst, mpath, name):
     """把本次包与清单同步进部署目录，并清掉上一版 exe。
 
@@ -473,10 +489,9 @@ def sync_share(dst, mpath, name):
     removed = []
     for fn in os.listdir(SHARE_DIR):
         if fn.lower().endswith(".exe"):
-            os.remove(os.path.join(SHARE_DIR, fn))
-            removed.append(fn)
+            removed.append(os.path.join(SHARE_DIR, fn))
     if removed:
-        log("清掉上一版安装包 %d 个：%s" % (len(removed), "、".join(removed)))
+        archive_old_packages(removed)
     shutil.copy2(dst, os.path.join(SHARE_DIR, name))
     shutil.copy2(mpath, os.path.join(SHARE_DIR, "desktop-version.json"))
     if sha256_of(os.path.join(SHARE_DIR, name)) != sha256_of(dst):

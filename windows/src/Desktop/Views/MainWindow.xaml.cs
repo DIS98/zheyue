@@ -65,6 +65,11 @@ namespace ClashDeck.Views
             if (Width > wa.Width * 0.96) Width = Math.Max(MinWidth, wa.Width * 0.96);
             if (Height > wa.Height * 0.94) Height = Math.Max(MinHeight, wa.Height * 0.94);
 
+            // --width/--height：给截图验证用。窗口最小宽度下工具栏最容易挤爆，
+            // 只测默认尺寸等于没测（用户一缩窗口问题就回来）。
+            if (int.TryParse(ArgValue("--width"), out var cw) && cw >= MinWidth && cw <= 4000) Width = cw;
+            if (int.TryParse(ArgValue("--height"), out var ch) && ch >= MinHeight && ch <= 3000) Height = ch;
+
             SyncTitleBarToTheme();
             UpdateThemeButton();
             BuildTray();
@@ -157,9 +162,7 @@ namespace ClashDeck.Views
             _ready = true;
 
             ShowPage("overview");
-            _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-            _timer.Tick += async (_, __) => await PollAsync();
-            _timer.Start();
+            EnsurePollTimer();
             await PollAsync();
 
             // 配置读不出来时后端会按默认值启动 —— 端口、订阅、分流模式全变回默认。
@@ -741,12 +744,7 @@ namespace ClashDeck.Views
                 if (!_ready)
                 {
                     _ready = true;
-                    if (_timer == null)
-                    {
-                        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-                        _timer.Tick += async (_, __) => await PollAsync();
-                    }
-                    _timer.Start();
+                    EnsurePollTimer();
                 }
                 Splash.Visibility = Visibility.Collapsed;
                 await PollAsync();
@@ -756,6 +754,20 @@ namespace ClashDeck.Views
             {
                 Toast(msg, false);
             }
+        }
+
+        /// <summary>
+        /// 快照轮询计时器只有一个：启动与"后端恢复"两处都要它，
+        /// 各写一遍就会出现两个 2 秒计时器同时打 /api/snapshot（请求直接翻倍）。
+        /// </summary>
+        private void EnsurePollTimer()
+        {
+            if (_timer == null)
+            {
+                _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                _timer.Tick += async (_, __) => await PollAsync();
+            }
+            if (!_timer.IsEnabled) _timer.Start();
         }
 
         // ================================================================ 退出

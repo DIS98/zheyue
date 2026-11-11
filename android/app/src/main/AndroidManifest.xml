@@ -60,6 +60,19 @@
         </receiver>
 
         <!--
+            订阅周期触发点。exported=false：本机闹钟才能唤醒。
+            开机只重排闹钟，不发起下载；周期到达时只投递给已运行的前台服务或记待更新。
+        -->
+        <receiver
+            android:name=".data.SubscriptionTickReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.clashdeck.android.action.SUB_TICK" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
             安装包通过 content:// 交给系统安装器。
             exported 必须为 false：true 等于把私有目录的读权限开给任意应用。
             authorities 用 applicationId 派生，避免与其他应用撞车。

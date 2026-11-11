@@ -11,8 +11,8 @@
     <ApplicationIcon>..\assets\clashdeck.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
-    <Version>2.6.15</Version>
-    <FileVersion>2.6.15.0</FileVersion>
+    <Version>2.6.17</Version>
+    <FileVersion>2.6.17.0</FileVersion>
     <AssemblyTitle>折跃</AssemblyTitle>
     <Product>折跃</Product>
     <Company>折跃</Company>

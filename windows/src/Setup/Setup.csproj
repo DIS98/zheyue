@@ -11,8 +11,8 @@
     <AssemblyName>ClashDeckSetup</AssemblyName>
     <RootNamespace>ClashDeckSetup</RootNamespace>
     <ApplicationIcon>..\assets\clashdeck.ico</ApplicationIcon>
-    <Version>2.6.15</Version>
-    <FileVersion>2.6.15.0</FileVersion>
+    <Version>2.6.17</Version>
+    <FileVersion>2.6.17.0</FileVersion>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <NoWarn>CA1416;CS0168;WFO1000;CS0414</NoWarn>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>

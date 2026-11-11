@@ -24,11 +24,11 @@
 <main id="top">
   <section class="hero">
     <div class="container">
-      <span class="eyebrow"><span class="dot"></span>OPEN SOURCE · Windows 2.6.15 / Android 2.0.9</span>
+      <span class="eyebrow"><span class="dot"></span>OPEN SOURCE · Windows 2.6.17 / Android 2.2.0</span>
       <h1>折跃<span>Zheyue</span></h1>
       <p class="tagline">一套自绘控制台，把代理内核带进 Windows 与 Android。</p>
       <p class="sub">Windows 10 1903+ · Android 8.0+ (arm64-v8a)</p>
-      <div class="badges"><span class="badge"><b>MIT</b> 许可证</span><span class="badge"><b>PUBLIC</b> 可见性</span><span class="badge"><b>Windows 2.6.15 / Android 2.0.9</b> 当前版本</span></div>
+      <div class="badges"><span class="badge"><b>MIT</b> 许可证</span><span class="badge"><b>PUBLIC</b> 可见性</span><span class="badge"><b>Windows 2.6.17 / Android 2.2.0</b> 当前版本</span></div>
       <div class="cta">
         <a class="btn primary" href="#downloads">下载最新版 ↓</a>
         <a class="btn" href="#features">了解功能</a>
@@ -54,13 +54,13 @@
 
   <section class="section container" id="start">
     <div class="section-head reveal"><span class="kicker">03 / 快速开始</span><h2>四步跑起来</h2><p>只想用，就走前三步；想改，再看第四步。</p></div>
-    <div class="steps"><div class="step reveal"><div class="num">1</div><div><h3>下载对应端的安装包</h3><p>到 Releases 取最新一版。Windows 是单文件离线安装包，Android 是 arm64-v8a 的 APK。</p><pre><code>Releases → windows-2.6.15 → ClashDeck-Setup-2.6.15-3be1ca69-clean.exe
-Releases → android-2.0.9  → Zheyue-2.0.9-94eab139.apk</code></pre></div></div><div class="step reveal"><div class="num">2</div><div><h3>Windows：安装并启动</h3><p>双击安装包走四步向导，当前用户安装、不需要管理员、不写系统级配置、不装服务。首次运行若出现系统安全提示，选择「更多信息 → 仍要运行」。</p><pre><code># 普通启动：双击主程序
+    <div class="steps"><div class="step reveal"><div class="num">1</div><div><h3>下载对应端的安装包</h3><p>到 Releases 取最新一版。Windows 是单文件离线安装包，Android 是 arm64-v8a 的 APK。</p><pre><code>Releases → windows-2.6.17 → ClashDeck-Setup-2.6.17-ced81c17-clean.exe
+Releases → android-2.2.0  → Zheyue-2.2.0-08c4c47a.apk</code></pre></div></div><div class="step reveal"><div class="num">2</div><div><h3>Windows：安装并启动</h3><p>双击安装包走四步向导，当前用户安装、不需要管理员、不写系统级配置、不装服务。首次运行若出现系统安全提示，选择「更多信息 → 仍要运行」。</p><pre><code># 普通启动：双击主程序
 # 只有使用 TUN 模式时才需要管理员启动
 start-admin.cmd
 
 # 静默安装 / 卸载
-ClashDeck-Setup-2.6.15-3be1ca69-clean.exe --silent
+ClashDeck-Setup-2.6.17-ced81c17-clean.exe --silent
 uninstall.exe --silent</code></pre></div></div><div class="step reveal"><div class="num">3</div><div><h3>Android：授权并连接</h3><p>安装 APK 后打开应用，在概览页打开一键连接并授予 VPN 权限；随后选择模式与分流策略即可。</p><pre><code># 从源码构建（两步）
 bash tools/build-core.sh        # Go → libclash.so
 ./gradlew assembleRelease       # 产物：app/build/outputs/apk/release/app-release.apk</code></pre></div></div><div class="step reveal"><div class="num">4</div><div><h3>导入订阅并激活</h3><p>在配置页粘贴订阅链接或 YAML 内容，激活后回到概览页启动。内核路径默认指向随包内核，无需手动指定。</p><pre><code># 自检（面板运行时）
@@ -102,7 +102,7 @@ bash tools/gate.sh</code></pre></div></div></div>
   <section class="section alt" id="downloads">
     <div class="container">
       <div class="section-head reveal"><span class="kicker">06 / 下载</span><h2>安装包</h2><p>所有二进制都放在 Releases，不进源码仓库。</p></div>
-      <div class="dl-cards"><div class="dl-card reveal"><span class="tag">windows-2.6.15</span><h3>ClashDeck-Setup-2.6.15-3be1ca69-clean.exe</h3><div class="meta">73,308,528 B</div><p>Windows 单文件离线安装包，当前用户安装</p><a class="btn" href="https://github.com/DIS98/zheyue/releases/tag/windows-2.6.15">下载 →</a></div><div class="dl-card reveal"><span class="tag">android-2.0.9</span><h3>Zheyue-2.0.9-94eab139.apk</h3><div class="meta">42,730,944 B</div><p>Android arm64-v8a 安装包</p><a class="btn" href="https://github.com/DIS98/zheyue/releases/tag/android-2.0.9">下载 →</a></div></div>
+      <div class="dl-cards"><div class="dl-card reveal"><span class="tag">windows-2.6.17</span><h3>ClashDeck-Setup-2.6.17-ced81c17-clean.exe</h3><div class="meta">73,317,232 B</div><p>Windows 单文件离线安装包，当前用户安装</p><a class="btn" href="https://github.com/DIS98/zheyue/releases/tag/windows-2.6.17">下载 →</a></div><div class="dl-card reveal"><span class="tag">android-2.2.0</span><h3>Zheyue-2.2.0-08c4c47a.apk</h3><div class="meta">42,749,680 B</div><p>Android arm64-v8a 安装包</p><a class="btn" href="https://github.com/DIS98/zheyue/releases/tag/android-2.2.0">下载 →</a></div></div>
     </div>
   </section>
 
@@ -114,7 +114,7 @@ bash tools/gate.sh</code></pre></div></div></div>
   </section>
 </main>
 
-<footer><div class="container"><span>折跃 Zheyue · Windows 2.6.15 / Android 2.0.9 · MIT License</span><span><a href="https://github.com/DIS98/zheyue">源码</a> · <a href="https://github.com/DIS98/zheyue/releases">下载</a> · <a href="https://github.com/DIS98/zheyue/blob/main/THIRD-PARTY-NOTICES.md">第三方声明</a></span></div></footer>
+<footer><div class="container"><span>折跃 Zheyue · Windows 2.6.17 / Android 2.2.0 · MIT License</span><span><a href="https://github.com/DIS98/zheyue">源码</a> · <a href="https://github.com/DIS98/zheyue/releases">下载</a> · <a href="https://github.com/DIS98/zheyue/blob/main/THIRD-PARTY-NOTICES.md">第三方声明</a></span></div></footer>
 <script src="assets/site.js"></script>
 </body>
 </html>

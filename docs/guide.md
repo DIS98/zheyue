@@ -10,8 +10,8 @@
 到 Releases 取最新一版。Windows 是单文件离线安装包，Android 是 arm64-v8a 的 APK。
 
 ```text
-Releases → windows-2.6.15 → ClashDeck-Setup-2.6.15-3be1ca69-clean.exe
-Releases → android-2.0.9  → Zheyue-2.0.9-94eab139.apk
+Releases → windows-2.6.17 → ClashDeck-Setup-2.6.17-ced81c17-clean.exe
+Releases → android-2.2.0  → Zheyue-2.2.0-08c4c47a.apk
 ```
 
 ### 2. Windows：安装并启动
@@ -24,7 +24,7 @@ Releases → android-2.0.9  → Zheyue-2.0.9-94eab139.apk
 start-admin.cmd
 
 # 静默安装 / 卸载
-ClashDeck-Setup-2.6.15-3be1ca69-clean.exe --silent
+ClashDeck-Setup-2.6.17-ced81c17-clean.exe --silent
 uninstall.exe --silent
 ```
 

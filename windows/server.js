@@ -100,6 +100,9 @@ const DEFAULT_SETTINGS = {
   speedTestBytes: 5242880,
   logToFile: true,    // 日志落盘
   logConn: true,      // 记录连接日志（含访问域名，属于隐私，可关）
+  // 日志文件保留天数：7 / 30 / 0（0 = 永不删除）。
+  // 以前固定 7 天，排障想回溯一个月时无从下手；这个值给用户选，写入前过白名单。
+  logKeepDays: 7,
   proxyMode: 'smart', // smart=兜底走代理；whitelist=兜底直连，只有列出的走代理
 };
 
@@ -240,6 +243,8 @@ let settings = loadSettings();
 settings.testUrl = normalizeTestUrl(settings.testUrl) || DEFAULT_TEST_URL;
 if (typeof settings.logToFile !== 'boolean') settings.logToFile = true;
 if (typeof settings.logConn !== 'boolean') settings.logConn = true;
+// 0 是合法值（永不删除），所以不能写成 `!settings.logKeepDays` —— 那会把"永不"改回 7 天
+if (!Number.isFinite(settings.logKeepDays) || settings.logKeepDays < 0) settings.logKeepDays = 7;
 if (settings.proxyMode !== 'whitelist') settings.proxyMode = 'smart';
 if (!Number(settings.delayTimeout) || settings.delayTimeout < 1000) settings.delayTimeout = 5000;
 
@@ -801,13 +806,23 @@ setInterval(historyTick, 2000);
 
 // ---------------------------------------------------------------- 内核进程
 
+/**
+ * 内存环形缓冲容量。
+ *
+ * 客户端是"只留最近 N 行、一直跟到底"的窗口模型，所以这里必须比页面窗口大，
+ * 否则用户切回来时中间那段已经回绕丢了。600 只够 2 分钟的连接日志，
+ * 一次内核启动 + 刷几个页面就填满，界面上看就是"日志停了"。
+ * 3000 行 ≈ 600 KB 常驻，换掉一个反复出现的困惑，很划算。
+ */
+const LOG_RING_LIMIT = 3000;
+
 const core = {
   proc: null,
   pid: null,
   startedAt: 0,
   lastExit: null,
   log: [],          // {seq, t, stream, line}
-  logLimit: 600,
+  logLimit: LOG_RING_LIMIT,
 };
 
 /**
@@ -916,7 +931,7 @@ function pushLog(stream, text) {
       if (m) {
         const host = m[1];
         // 登记去重键，让 8 秒补采不要再记一遍同一条
-        if (connSeen.size < 20000) connSeen.add('h:' + host + ':' + m[2]);
+        rememberConn('h:' + host + ':' + m[2]);
         const rule = m[3];
         const chain = m[4].replace(/\[.*?\]$/, '').trim();
         writeLogLine('conn', host + ':' + m[2] + '  ' + rule + '  → ' + chain, stamp, full);
@@ -927,9 +942,14 @@ function pushLog(stream, text) {
 
 let connLogEnabled = true;   // 运行时状态，由 settings.logConn 决定
 
-/** 只保留最近 N 天的日志文件，避免无限增长 */
+/**
+ * 只保留最近 N 天的日志文件，避免无限增长。
+ * `logKeepDays = 0` 是"永不删除"——用户明确要留档时，清理逻辑必须真的停手，
+ * 而不是把 0 当成"没设置"再回落 7 天（那等于用户的选项被静默否决）。
+ */
 function pruneLogs(keepDays) {
-  const days = keepDays || settings.logKeepDays || 7;
+  const days = keepDays === undefined ? settings.logKeepDays : keepDays;
+  if (!(Number(days) > 0)) return 0;
   try {
     const files = fs.readdirSync(LOG_DIR).filter((f) => /^clashdeck-\d{8}\.log$/.test(f));
     const cut = Date.now() - days * 86400000;
@@ -940,14 +960,35 @@ function pruneLogs(keepDays) {
       const t = new Date(+m[1], +m[2] - 1, +m[3]).getTime();
       if (t < cut) { fs.unlinkSync(path.join(LOG_DIR, f)); removed++; }
     }
-    if (removed) console.log('[logs] 清理过期日志 ' + removed + ' 个');
-  } catch { /* 目录不存在等 */ }
+    if (removed) console.log('[logs] 清理过期日志 ' + removed + ' 个（保留 ' + days + ' 天）');
+    return removed;
+  } catch { return 0; /* 目录不存在等 */ }
 }
 
 // ---------------------------------------------------------------- 连接日志
 /** 记录"谁、什么时候、访问了什么、命中哪条规则、走了哪个节点" */
 const connSeen = new Set();
+/** 去重键上限。超过就按插入顺序淘汰最旧的，不整批清空。 */
+const CONN_SEEN_MAX = 20000;
 let connLogTimer = null;
+
+/**
+ * 记一个去重键，返回"之前没见过"。
+ *
+ * 以前是"满了就 clear"（`if (size > 20000) clear()`）：清空那一刻，
+ * 还在跑的长连接会被 8 秒补采重新记一遍，日志里就冒出成对的重复行。
+ * 换成 FIFO 淘汰最旧的键，容量一样有界，但不会整批失忆。
+ * 复杂度 O(1)：Set 的迭代顺序就是插入顺序，取头删头即可。
+ */
+function rememberConn(key) {
+  if (connSeen.has(key)) return false;
+  connSeen.add(key);
+  if (connSeen.size > CONN_SEEN_MAX) {
+    const oldest = connSeen.values().next().value;
+    if (oldest !== undefined) connSeen.delete(oldest);
+  }
+  return true;
+}
 
 async function pollConnLog() {
   if (!coreRunning()) return;
@@ -955,16 +996,14 @@ async function pollConnLog() {
   if (!r.ok || !r.data) return;
   for (const c of (r.data.connections || [])) {
     const id = c.id || (c.metadata && c.metadata.sourceIP + ':' + c.metadata.sourcePort);
-    if (!id || connSeen.has(id)) continue;
-    connSeen.add(id);
+    if (!id || !rememberConn(id)) continue;
     const m = c.metadata || {};
     const host = m.host || (m.destinationIP ? m.destinationIP : '');
     if (!host) continue;
     // 同一条连接可能既被内核日志解析记一次、又被这里轮询记一次（两套格式不同，看着像两条）。
     // 用 host:端口 再挡一道，避免日志里出现成对重复。
     if (connLogEnabled && settings.logConn !== false) {
-      if (connSeen.has('h:' + host + ':' + (m.destinationPort || ''))) continue;
-      connSeen.add('h:' + host + ':' + (m.destinationPort || ''));
+      if (!rememberConn('h:' + host + ':' + (m.destinationPort || ''))) continue;
     }
     const port = m.destinationPort ? ':' + m.destinationPort : '';
     const proc = m.process || '';
@@ -977,8 +1016,6 @@ async function pollConnLog() {
       + '  ' + net + (rule ? '  ' + rule : '') + (chain ? '  → ' + chain : '')
       + '  ↑' + fmtBytes(up) + ' ↓' + fmtBytes(down));
   }
-  // 防无限增长：连接 id 集合超限就重置（日志本身已落盘，丢的只是去重表）
-  if (connSeen.size > 20000) connSeen.clear();
 }
 
 function startConnLog() {
@@ -1050,16 +1087,27 @@ function portBusy(port) {
   });
 }
 
+/** 规则集可能是 mrs（二进制）也可能是 list/yaml（文本），扩展名都认 */
+const RULE_ASSET_RE = /\.(mrs|list|yaml|yml|txt)$/i;
+
 // 内核启动时会按 rule-providers 里的相对路径去 ./ruleset 找规则文件。
 // 找不到就现场联网下载 —— 而此时网络正等着内核起来，于是表现为"启动卡住/规则不全"。
-// 把本机已有的 ruleset 目录搬进运行时目录，启动就变成纯本地动作。
+// 把本机已有的规则集搬进运行时目录，启动就变成纯本地动作。
+//
+// 随包分发的 rules\ 必须排在第一位：它是安装包里唯一"一定存在且离线可用"的那份。
+// 2.6.15 之前这里只扫 core\ruleset 与 %APPDATA% 下的第三方客户端目录 ——
+// 关掉增强分流（sub 自带 11 个 http provider）时，随包的 cn.mrs / cn-ip.mrs
+// 一个都用不上，只能开机现下 jsdelivr；直连被掐就变成 ruleCount=0，
+// 界面上就是"分流规则有 5/11 个没加载"。
 function findRulesetDirs() {
   const dirs = [];
   const push = (d) => {
     try {
-      if (d && fs.existsSync(d) && fs.statSync(d).isDirectory()) dirs.push(d);
+      if (d && fs.existsSync(d) && fs.statSync(d).isDirectory() && !dirs.includes(d)) dirs.push(d);
     } catch { /* 忽略权限问题 */ }
   };
+  push(path.join(ROOT, 'rules'));
+  push(path.join(RUNTIME, 'rules'));
   push(path.join(settings.geoSourceDir || '', 'ruleset'));
   const base = path.dirname(settings.corePath || '');
   push(path.join(base, 'ruleset'));
@@ -1073,6 +1121,76 @@ function findRulesetDirs() {
   return dirs;
 }
 
+/**
+ * 解析运行时配置里的 rule-providers 段落，得到 `[{name, path, url, type, format, behavior}]`。
+ *
+ * 不用 YAML 库：这里只认后端自己生成的缩进格式（2 空格名字、4 空格键），
+ * 引一个 YAML 依赖只为读 11 行块不值得。
+ * `path` 一律解析成绝对路径 —— 内核是 `-d RUNTIME` 启动的，相对路径基准就是 RUNTIME，
+ * 拼接基准搞错就会"以为文件在、其实在别处"。
+ */
+/**
+ * 逐行穿一遍 rule-providers 段落，由回调决定这一行保留、替换还是删掉。
+ *
+ * 抽出来的理由不是"看起来整齐"：这段 YAML 有三处要读（列清单、补 proxy、清理悬空引用），
+ * 各写一套"哪里算块开始、什么算一个键"的状态机，改一处忘一处就是行为分叉。
+ * 回调签名 `(name, key, value, line)`，返回 undefined 保留 / string 替换 / null 删除。
+ */
+function mapProviderBlock(text, fn) {
+  const out = [];
+  let inBlock = false;
+  let name = null;
+  for (const line of String(text).split(/\r?\n/)) {
+    if (/^rule-providers\s*:/.test(line)) { inBlock = true; name = null; out.push(line); continue; }
+    if (!inBlock) { out.push(line); continue; }
+    if (!line.trim()) { out.push(line); continue; }      // 块内空行不算结束
+    if (!/^\s/.test(line)) { inBlock = false; out.push(line); continue; }
+
+    const nm = /^ {2}([A-Za-z0-9_@.\-]+)\s*:\s*$/.exec(line);
+    if (nm) { name = nm[1]; out.push(line); continue; }
+
+    const kv = /^ {4}([A-Za-z][\w-]*)\s*:\s*(.*?)\s*$/.exec(line);
+    if (kv && name) {
+      const r = fn(name, kv[1], kv[2].replace(/^['"]|['"]$/g, ''), line);
+      if (r === null) continue;
+      out.push(typeof r === 'string' ? r : line);
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+function providerSlots(text) {
+  const byName = new Map();
+  mapProviderBlock(text, (name, key, value) => {
+    if (!byName.has(name)) byName.set(name, { name });
+    byName.get(name)[key] = value;
+  });
+  const out = [...byName.values()];
+  for (const s of out) if (s.path) s.path = path.resolve(RUNTIME, s.path);
+  return out;
+}
+
+/**
+ * 同一个规则集的"同族文件名"。
+ *
+ * 随包用的是 `microsoft-cn.mrs` / `steam-cn.mrs`，订阅 provider 写的是
+ * `microsoft@cn` / `steam@cn` —— 名字对不上，文件明明在本机也算"没有"。
+ * 这里把 `@` 与 `-` 互转、并允许扩展名互换，把这些只是写法不同的情况接住。
+ */
+function sameFamilyKeys(baseName) {
+  const keys = new Set();
+  // 只认同一个扩展名：.mrs 是二进制、.list 是文本，把 list 塞进 mrs 路径内核会解析失败
+  const m = /^(.*?)(\.[A-Za-z0-9]+)$/.exec(baseName);
+  const stem = m ? m[1] : baseName;
+  const ext = m ? m[2].toLowerCase() : '';
+  const stems = new Set([stem, stem.replace(/@/g, '-'), stem.replace(/-/g, '@')]);
+  for (const x of stems) keys.add((x + ext).toLowerCase());
+  return keys;
+}
+
+/** 把本机已有的规则集按文件原名搬进 data\runtime\ruleset，缺哪个补哪个 */
 function ensureRulesetAssets() {
   const dirs = findRulesetDirs();
   if (!dirs.length) return 0;
@@ -1090,6 +1208,104 @@ function ensureRulesetAssets() {
   }
   if (copied) pushLog('sys', `补齐规则集 ${copied} 个文件（内核启动不必再联网下载）`);
   return copied;
+}
+
+/**
+ * 按"当前配置真正要哪些规则集"逐项补齐，名字不同也认。
+ *
+ * ensureRulesetAssets 只会照抄文件名，订阅里的 `microsoft@cn` 与随包的 `microsoft-cn`
+ * 在它眼里是两个不同的东西。这一步以 provider 的 path 为准去反向找本地文件，
+ * 找到就硬链接过去 —— 于是内核看到文件已存在，整段下载动作被跳过。
+ */
+function fillProviderAssets() {
+  let text = '';
+  try { text = fs.readFileSync(path.join(RUNTIME, 'config.yaml'), 'utf8'); } catch { return 0; }
+  const slots = providerSlots(text);
+  if (!slots.length) return 0;
+
+  const index = new Map();
+  for (const dir of findRulesetDirs()) {
+    let files = [];
+    try { files = fs.readdirSync(dir); } catch { continue; }
+    for (const f of files) {
+      const k = f.toLowerCase();
+      if (!RULE_ASSET_RE.test(k) || index.has(k)) continue;
+      index.set(k, path.join(dir, f));
+    }
+  }
+
+  let filled = 0;
+  for (const s of slots) {
+    if (!s.path) continue;
+    let have = 0;
+    try { have = fs.statSync(s.path).size; } catch { have = 0; }
+    if (have > 0) continue;
+    let src = null;
+    for (const k of sameFamilyKeys(path.basename(s.path))) {
+      if (index.has(k)) { src = index.get(k); break; }
+    }
+    if (!src) continue;
+    try { fs.mkdirSync(path.dirname(s.path), { recursive: true }); } catch { /* 已存在 */ }
+    // 必须复制、不能硬链接：http provider 会往这个路径回写下载结果，
+    // 硬链接会让内核把随包的 rules\ 那份一起改掉（同 inode）
+    try { fs.copyFileSync(src, s.path); } catch { continue; }
+    filled++;
+  }
+  if (filled) pushLog('sys', `本地补齐规则集 ${filled} 个（按 provider 名字对齐，免联网）`);
+  return filled;
+}
+
+/**
+ * 给指定 provider 补一个 `proxy: <代理组>` 字段。
+ *
+ * 这是 mihomo 原生支持的规则集下载通道：provider 默认走 DIRECT，
+ * 而缺的这几个源（jsdelivr / raw.githubusercontent）**恰恰在严格模式下就是直连**，
+ * 于是"规则空 → 走 DIRECT → 下载失败 → 规则还是空"完美闭环。
+ * 指定 proxy 之后由内核自己经节点去抓，绕过它当前的空规则表，是最短的一条路。
+ */
+function addProviderProxy(text, names, group) {
+  const wanted = new Set(names);
+  // 先扫一遍谁已经有 proxy：只看 type 就插的话，重复调用会插出第二行
+  const has = new Set();
+  mapProviderBlock(text, (name, key) => { if (key === 'proxy') has.add(name); });
+
+  const done = new Set();      // 一个 provider 只动一次
+  let touched = 0;
+  const out = mapProviderBlock(text, (name, key, value, line) => {
+    if (!wanted.has(name) || done.has(name)) return undefined;
+    if (key === 'proxy') { done.add(name); touched++; return '    proxy: ' + group; }
+    if (key === 'type' && !has.has(name)) { done.add(name); touched++; return line + '\n    proxy: ' + group; }
+    return undefined;
+  });
+  return { text: out, touched };
+}
+
+/**
+ * 补不齐的规则集：补 `proxy:` 字段 + 重载配置，让内核经节点再抓一次。
+ *
+ * 调用点是非阻塞的：启动不该被网络拖住，界面上会先看到「N/M 没加载」，
+ * 几秒后自己变成已加载 —— 比卡在启动中诚实。
+ */
+async function repairProviders(emptyNames) {
+  if (!emptyNames || !emptyNames.length) return 0;
+  const cfgPath = path.join(RUNTIME, 'config.yaml');
+  let text = '';
+  try { text = fs.readFileSync(cfgPath, 'utf8'); } catch { return 0; }
+  const group = pickMainGroup(text);
+  if (!group) {
+    pushLog('err', '规则集补不齐，而且这份配置里找不到可选代理组，没法经代理重试');
+    return 0;
+  }
+  const patched = addProviderProxy(text, emptyNames, group);
+  if (!patched.touched) return 0;
+
+  try { atomicWrite(cfgPath, patched.text); } catch { /* 写不进就等下次启动 */ }
+  pushLog('sys', `已让 ${patched.touched} 个规则集改走「${group}」重新抓取`);
+  // 30 秒：重载会重建全部规则集，8 秒那次实测就超时了（超时 ≠ 没生效）
+  const rl = await apiJson('PUT', '/configs', { path: cfgPath }, 30000);
+  if (!rl.ok) pushLog('sys', '重载配置未确认成功：' + (rl.msg || '未知原因') + '（内核可能仍在应用）');
+  await sleep(1200);   // 等内核把这几个 provider 拉完，下面紧接着重查才有意义
+  return patched.touched;
 }
 
 /**
@@ -1111,6 +1327,7 @@ function ensureRulesetAssets() {
  *   否则               → empty.length 个没加载，共 total 个
  */
 let rulesOk = null;
+let lastRulesWarn = '';   // 上一次已经报过的"没加载"集合，避免重复刷日志
 
 async function checkRulesOk() {
   // 控制口比 rule-provider 先就绪 —— 内核先监听 external-controller，再异步灌规则集，
@@ -1138,13 +1355,35 @@ async function checkRulesOk() {
   }
   const empty = names.filter((n) => !(Number(providers[n] && providers[n].ruleCount) > 0));
   rulesOk = { ok: empty.length === 0, total: names.length, empty, checkedAt: Date.now() };
-  if (empty.length) {
+  // 同一批东西只报一次：快照每 30 秒兜底重查一次，无脑 pushLog 会把日志刷成刷屏
+  const sig = empty.length ? empty.join('|') + '@' + names.length : '';
+  if (sig && sig !== lastRulesWarn) {
+    lastRulesWarn = sig;
     const head = empty.slice(0, 5).join(', ') + (empty.length > 5 ? ' …' : '');
     pushLog('err', `分流规则集未加载：${empty.length}/${names.length} 个 provider 的规则数为 0`
       + `（${head}）。此时这些规则一条都不生效，严格模式下会全部直连。`
-      + '多半是 data\\runtime\\rules\\ 缺失或被内核读不到。');
+      + '原因多半是这几个规则集的下载源连不上；概览页那条告警可以直接点「重试加载」，'
+      + '也可以关掉「增强分流」改用随包的本地规则集。');
+  } else if (!sig) {
+    lastRulesWarn = '';
   }
   return rulesOk;
+}
+
+/**
+ * 补完规则集之后要"等它拉完"再看结果。
+ *
+ * 内核重载配置是异步的：PUT /configs 返回 204 只代表配置收下了，
+ * provider 还在后台下。查一次就下结论会把"正在下"写成"还是没加载"，
+ * 而那个结论会被缓存住，直到下一次快照兜底重查（30 秒）才纠正。
+ */
+async function recheckRulesUntilOk(tries = 8, gapMs = 2000) {
+  for (let i = 0; i < tries; i++) {
+    await checkRulesOk();
+    if (rulesOk && rulesOk.ok) return true;
+    await sleep(gapMs);
+  }
+  return false;
 }
 
 async function startCoreInner() {
@@ -1180,9 +1419,13 @@ async function startCoreInner() {
 
   ensureGeoAssets();
   ensureRulesetAssets();
+  fillProviderAssets();   // 订阅 provider 与随包文件同名不同写法时，这一步才认得出来
   const localRules = ensureLocalRules();
-  if (localRules > 0) pushLog('sys', `分流规则集就位 ${localRules} 个（本地 mrs，无需联网）`);
-  else if (settings.enhancedRules !== false) {
+  if (localRules.present > 0) {
+    if (localRules.created > 0) {
+      pushLog('sys', `分流规则集就位 ${localRules.present} 个（本地 mrs，无需联网）`);
+    }
+  } else if (settings.enhancedRules !== false) {
     // 返回 0 不再静默：要么 rules\ 整个没随包发出来，要么 hardlink/copy 全被权限挡住。
     // 这两种情况内核都会"起得来但规则全空"，而 -t 校验不出来，只能靠这里留痕。
     // 关掉增强分流时本地规则本来就不参与，所以那种情况不吵。
@@ -1246,6 +1489,13 @@ async function startCoreInner() {
           pushLog('sys', '连接日志已关闭（不记录访问域名，仅保留内核运行日志）');
         }
         await checkRulesOk();   // 规则集是否真的加载进来了（-t 查不出来）
+        // 还有空的就借代理补一次。故意不 await：启动不该被网络拖住，
+        // 补完立刻重查，快照下一轮就会把 "N/M 没加载" 换成已加载。
+        if (rulesOk && !rulesOk.ok && rulesOk.empty.length) {
+          repairProviders(rulesOk.empty)
+            .then((n) => (n ? recheckRulesUntilOk() : false))
+            .catch(() => { /* 补不上就保留告警，界面已经如实说了 */ });
+        }
         return {
           ok: true,
           ready: true,
@@ -1661,15 +1911,21 @@ const LOCAL_RULES = [
   'geolocation-not-cn',
 ];
 
-/** 把安装目录里的 rules/ 硬链接到运行目录（省磁盘，同分区零额外占用） */
+/**
+ * 把安装目录里的 rules/ 硬链接到运行目录（省磁盘，同分区零额外占用）。
+ *
+ * 返回 `{ created, present }` —— 分开报是必要的：以前只返回"这次新建了几个"，
+ * 于是第二次启动恒为 0，调用方就按"一个都没就位"记一条 err。
+ * 文件明明在、规则也在跑，日志里却天天报错，这种假警报比没日志更坏事。
+ */
 function ensureLocalRules() {
   const srcDir = path.join(ROOT, 'rules');
   const dstDir = path.join(RUNTIME, 'rules');
-  if (!fs.existsSync(srcDir)) return 0;
+  if (!fs.existsSync(srcDir)) return { created: 0, present: 0 };
   try { fs.mkdirSync(dstDir, { recursive: true }); } catch { /* 已存在 */ }
-  let n = 0;
+  let created = 0;
   let names = [];
-  try { names = fs.readdirSync(srcDir); } catch { return 0; }
+  try { names = fs.readdirSync(srcDir); } catch { return { created: 0, present: 0 }; }
   for (const f of names) {
     if (!f.endsWith('.mrs')) continue;
     const src = path.join(srcDir, f);
@@ -1677,9 +1933,12 @@ function ensureLocalRules() {
     if (fs.existsSync(dst)) continue;
     try { fs.linkSync(src, dst); }
     catch { try { fs.copyFileSync(src, dst); } catch { continue; } }
-    n++;
+    created++;
   }
-  return n;
+  // 以"运行目录里现在有几个"为准，而不是"这次干了多少活"
+  let present = 0;
+  try { present = fs.readdirSync(dstDir).filter((f) => f.endsWith('.mrs')).length; } catch { present = created; }
+  return { created, present };
 }
 
 /** 找出订阅里的"主组"：第一个 type: select 的组，规则的分流目标就是它 */
@@ -2332,7 +2591,7 @@ async function mergeProfiles(baseFile, extraFiles, outName) {
 
 // ---------------------------------------------------------------- 控制接口客户端
 
-function apiJson(method, urlPath, body) {
+function apiJson(method, urlPath, body, timeoutMs) {
   return new Promise((resolve) => {
     const payload = body === undefined ? null : Buffer.from(JSON.stringify(body), 'utf8');
     const req = http.request({
@@ -2340,7 +2599,8 @@ function apiJson(method, urlPath, body) {
       port: settings.controllerPort,
       path: urlPath,
       method,
-      timeout: 8000,
+      // 默认 8 秒够所有读接口；PUT /configs 要重建 11 个规则集，必须单独放宽
+      timeout: timeoutMs || 8000,
       headers: {
         Authorization: 'Bearer ' + settings.secret,
         'Content-Type': 'application/json',
@@ -2580,6 +2840,8 @@ async function buildEnv(opts) {
     proxyMode: settings.proxyMode,
     logConn: settings.logConn !== false,
     logToFile: settings.logToFile !== false,
+    // 0 = 永不删除。界面用这个值回填下拉框，缺了就会每次打开都退回默认 7 天
+    logKeepDays: settings.logKeepDays,
     hasSysProxyTool: fs.existsSync(settings.sysProxyPath),
     sysProxy: await sysProxyEnv(!!(opts && opts.freshProxy)),
     testUrl: settings.testUrl,
@@ -2704,6 +2966,12 @@ async function handleApi(req, res, url) {
   }
 
   if (p === '/api/snapshot' && req.method === 'GET') {
+    // 规则集还在缺着就顺手再查一次（30 秒最多一次），不阻塞本次响应。
+    // 修补是异步的：补完那一刻内核还在拉，只有下一轮才看得到结果。
+    if (coreRunning() && rulesOk && !rulesOk.ok && Date.now() - rulesOk.checkedAt > 30000) {
+      rulesOk.checkedAt = Date.now();          // 先占位，避免两轮快照叠着查
+      checkRulesOk().catch(() => { /* 查不到就等下一轮 */ });
+    }
     return sendJson(res, 200, await snapshot());
   }
 
@@ -2895,6 +3163,19 @@ async function handleApi(req, res, url) {
       connLogEnabled = body.logConn;
     }
     if (typeof body.logToFile === 'boolean') settings.logToFile = body.logToFile;
+    if (body.logKeepDays !== undefined) {
+      const d = Number(body.logKeepDays);
+      // 只收 0 / 7 / 30：选项由界面给，后端不放开任意值，免得写进一个 99999 天等于没清
+      if (![0, 7, 30].includes(d)) {
+        return sendJson(res, 400, { ok: false, msg: '日志保留只能是 7 天、30 天或永不删除' });
+      }
+      settings.logKeepDays = d;
+      // 立刻执行一次：用户改成 7 天就是想把旧文件清掉，等到下次启动才生效等于没改
+      const removed = pruneLogs(d);
+      pushLog('sys', d === 0
+        ? '日志保留策略：永不删除（只受磁盘剩余空间限制）'
+        : `日志保留策略：最近 ${d} 天${removed ? `（已清理 ${removed} 个旧文件）` : ''}`);
+    }
     if (body.subIntervalHours !== undefined) {
       const h = Number(body.subIntervalHours);
       if (!(h >= 0 && h <= 168)) return sendJson(res, 400, { ok: false, msg: '订阅更新间隔需在 0–168 小时之间（0 = 不自动更新）' });
@@ -3190,6 +3471,30 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, count: list.length, providers: list });
   }
 
+  /**
+   * 手动重试"没加载的规则集"。
+   *
+   * 启动时那次修复是后台跑的，网络刚好不通就会失败；用户在概览的告警条上点一下，
+   * 就按"本地 → 代理"两条路重来一次，不用重启内核。
+   */
+  if (p === '/api/rules/repair' && req.method === 'POST') {
+    if (!coreRunning()) return sendJson(res, 400, { ok: false, msg: '内核没在运行，先启动内核' });
+    await checkRulesOk();
+    if (rulesOk && !rulesOk.ok && rulesOk.empty.length) {
+      const fixed = await repairProviders(rulesOk.empty);
+      // 这里等用户点完要看到结果，试的次数收一点：5 轮约 20 秒，客户端超时是 45 秒
+      if (fixed) await recheckRulesUntilOk(5, 1500);
+      if (!fixed) {
+        return sendJson(res, 200, {
+          ok: false,
+          msg: `还有 ${rulesOk.empty.length} 个规则集补不下来（直连与代理都不通）：${rulesOk.empty.join(', ')}`,
+          rulesOk,
+        });
+      }
+    }
+    return sendJson(res, 200, { ok: !!(rulesOk && rulesOk.ok), rulesOk });
+  }
+
   if (p === '/api/providers/rules/update' && req.method === 'POST') {
     const body = (await readJsonBody(req)).body || {};
     if (body.all) {
@@ -3444,6 +3749,10 @@ async function healStaleProxy(reason) {
 }
 
 pruneLogs();
+
+// 只在启动时清一次不够：面板开着跑一整周（托盘常驻就是这么用的），
+// 过期文件会一直堆到下次重启才消失。每 6 小时补一次，代价是一次 readdir。
+setInterval(() => pruneLogs(), 6 * 3600 * 1000).unref?.();
 
 /**
  * 更新包只在"下载完 → 安装前"这一小段时间有用。

@@ -42,15 +42,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.AnnotatedString
 import com.clashdeck.android.BuildConfig
 import com.clashdeck.android.R
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.clashdeck.android.data.AppPaths
 import com.clashdeck.android.data.ProfileInfo
+import com.clashdeck.android.data.SettingsRepo
 import com.clashdeck.android.ui.AppViewModel
 import com.clashdeck.android.ui.components.EmptyHint
 import com.clashdeck.android.ui.components.KvRow
@@ -78,6 +90,13 @@ fun ConfigPage(vm: AppViewModel, onOpenCoreLog: () -> Unit = {}) {
     var autoStart by remember { mutableStateOf(vm.settings.autoStart) }
     var builtinRules by remember { mutableStateOf(vm.settings.builtinRules) }
 
+    // 保存后收起键盘：数字键盘会盖住状态行，用户看不到「已保存」或失败原因。
+    val focus = LocalFocusManager.current
+
+    // 输入框圆角：M3 默认 4dp 在 20dp 圆角的卡片里像一块直角砖头，描边再清楚也显得「贴进去」。
+    // 12dp 让它读成卡片内部的一层，而不是外来控件。
+    val fieldShape = RoundedCornerShape(12.dp)
+
     val activeId by vm.activeProfileId.collectAsStateWithLifecycle()
 
     Column(
@@ -85,7 +104,8 @@ fun ConfigPage(vm: AppViewModel, onOpenCoreLog: () -> Unit = {}) {
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        // 卡片间距 16，卡片内边距 20：缝比留白窄，两张卡才不会被读成一组
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // ---------- 订阅列表 ----------
         SectionCard(
@@ -116,6 +136,7 @@ fun ConfigPage(vm: AppViewModel, onOpenCoreLog: () -> Unit = {}) {
                 onValueChange = { name = it },
                 label = { Text("名称（可留空）") },
                 singleLine = true,
+                shape = fieldShape,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
@@ -124,6 +145,7 @@ fun ConfigPage(vm: AppViewModel, onOpenCoreLog: () -> Unit = {}) {
                 onValueChange = { url = it },
                 label = { Text("订阅链接") },
                 singleLine = true,
+                shape = fieldShape,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(10.dp))
@@ -140,6 +162,175 @@ fun ConfigPage(vm: AppViewModel, onOpenCoreLog: () -> Unit = {}) {
             }
         }
 
+        // ---------- 订阅自动更新 ----------
+        // 放在「导入订阅」之后：这里是「订阅什么时候刷新」，与上面两张卡同一个语义组。
+        // 状态全部来自 vm 的 StateFlow，不用 remember 快照——后台会把结果写进 SP，
+        // 快照不会重组，界面就会停在旧结果上。
+        val sub by vm.subState.collectAsStateWithLifecycle()
+        val manualBusy by vm.subBusy.collectAsStateWithLifecycle()
+        // 后台服务里的刷新也置忙碌：否则点「立刻检查」之外的时间，界面停在旧结果上。
+        val effectiveBusy = manualBusy || sub.inFlight
+        val coreRunning by vm.coreState.collectAsStateWithLifecycle()
+        LaunchedEffect(Unit) {
+            // 页面可见期间对齐后台写进 SP 的状态；后台没有 StateFlow 可用。
+            while (true) {
+                vm.syncSubStatus()
+                kotlinx.coroutines.delay(2000)
+            }
+        }
+
+        SectionCard(
+            title = "订阅自动更新",
+            subtitle = "按间隔检查当前订阅，内容变化才更新",
+            trailing = {
+                if (effectiveBusy) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            },
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("自动检查订阅", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "连接期间由前台服务执行；未连接时下次打开 App 或连上后补做",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = sub.enabled,
+                    onCheckedChange = { vm.setSubAutoEnabled(it) },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .semantics {
+                            stateDescription = if (sub.enabled) "已开启" else "已关闭"
+                        },
+                )
+            }
+
+            if (sub.enabled) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "更新间隔",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                // 以 sub.intervalMinutes 为 key：保存成功或后台改值后自动回到规范化数字；
+                // 用户正在输入时 key 不变，不会被 2 秒一次的状态同步清空。
+                var intervalText by remember(sub.intervalMinutes) {
+                    mutableStateOf(sub.intervalMinutes.toString())
+                }
+                val parsedMinutes = intervalText.toIntOrNull()
+                val intervalValid = parsedMinutes != null &&
+                    parsedMinutes in SettingsRepo.SUB_INTERVAL_MIN..SettingsRepo.SUB_INTERVAL_MAX
+                val intervalDirty = parsedMinutes != sub.intervalMinutes
+                // 说明挂在 supportingText 里：TalkBack 聚焦输入框时会一起读，独立 Text 读不到。
+                Row(
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedTextField(
+                        value = intervalText,
+                        onValueChange = { raw -> intervalText = raw.filter { it.isDigit() }.take(5) },
+                        label = { Text("分钟") },
+                        singleLine = true,
+                        shape = fieldShape,
+                        isError = intervalText.isNotEmpty() && !intervalValid,
+                        enabled = !effectiveBusy,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        // 只放范围。140dp 宽在 1.5 倍字号下放不下「分钟」两字，会折成两行；
+                        // 单位已经在 label 里，这里不重复。
+                        supportingText = {
+                            Text(
+                                if (intervalText.isNotEmpty() && !intervalValid) {
+                                    "填 ${SettingsRepo.SUB_INTERVAL_MIN}–${SettingsRepo.SUB_INTERVAL_MAX}"
+                                } else {
+                                    "1–10080"
+                                },
+                            )
+                        },
+                        modifier = Modifier.width(140.dp),
+                    )
+                    Button(
+                        onClick = {
+                            focus.clearFocus()
+                            val minutes = intervalText.toIntOrNull()
+                            if (minutes == null) {
+                                vm.toast.value = "间隔要填数字，单位是分钟"
+                            } else {
+                                vm.setSubIntervalMinutes(minutes)
+                            }
+                        },
+                        enabled = !effectiveBusy && intervalValid,
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .heightIn(min = 48.dp),
+                    ) { Text("保存") }
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    if (intervalDirty && intervalValid) "改完点「保存」生效" else "30 = 半小时，60 = 1 小时",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (intervalDirty && intervalValid) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                Spacer(Modifier.height(10.dp))
+
+                Column(Modifier.fillMaxWidth()) {
+                    Text("上次检查", style = MaterialTheme.typography.bodyMedium)
+                    // 失败必须压过「已更新，下次连接生效」：上一次热重载没成功、
+                    // 这一轮又断网时，写「已更新」等于把失败藏起来。
+                    val status = when {
+                        effectiveBusy -> "正在检查…"
+                        sub.lastError != null -> "上次失败：${formatTime(sub.lastCheckAt)} · ${sub.lastError}"
+                        sub.pendingReload -> "订阅已更新，下次连接生效"
+                        sub.lastSuccessAt > 0L -> "上次成功：${formatTime(sub.lastSuccessAt)}"
+                        else -> "还没检查过"
+                    }
+                    // 浅色下主题 error 对白底只有 3.91:1，改用同源的 #C22428（5.87:1）。
+                    val failed = sub.lastError != null && !effectiveBusy
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when {
+                            !failed -> MaterialTheme.colorScheme.onSurfaceVariant
+                            isSystemInDarkTheme() -> MaterialTheme.colorScheme.error
+                            else -> Color(0xFFC22428)
+                        },
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                    if (!effectiveBusy && sub.lastError == null && !sub.pendingReload) {
+                        Text(
+                            if (coreRunning.running) "仅在连接期间按所选间隔检查"
+                            else "未连接，下次打开 App 或连接时补更",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { vm.refreshSubscriptions(force = true) },
+                    enabled = !effectiveBusy,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) { Text(if (effectiveBusy) "检查中…" else "立刻检查一次") }
+            } else {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "未开启自动更新",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         // ---------- 端口 ----------
         SectionCard(title = "端口", subtitle = "改完会重启内核生效") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -148,6 +339,7 @@ fun ConfigPage(vm: AppViewModel, onOpenCoreLog: () -> Unit = {}) {
                     onValueChange = { mixedPort = it.filter { c -> c.isDigit() } },
                     label = { Text("混合端口") },
                     singleLine = true,
+                    shape = fieldShape,
                     modifier = Modifier.weight(1f),
                 )
                 OutlinedTextField(
@@ -155,6 +347,7 @@ fun ConfigPage(vm: AppViewModel, onOpenCoreLog: () -> Unit = {}) {
                     onValueChange = { apiPort = it.filter { c -> c.isDigit() } },
                     label = { Text("控制端口") },
                     singleLine = true,
+                    shape = fieldShape,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -179,6 +372,7 @@ fun ConfigPage(vm: AppViewModel, onOpenCoreLog: () -> Unit = {}) {
                 onValueChange = { testUrl = it },
                 label = { Text("测速地址") },
                 singleLine = true,
+                shape = fieldShape,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
@@ -187,6 +381,7 @@ fun ConfigPage(vm: AppViewModel, onOpenCoreLog: () -> Unit = {}) {
                 onValueChange = { timeout = it.filter { c -> c.isDigit() } },
                 label = { Text("超时（毫秒）") },
                 singleLine = true,
+                shape = fieldShape,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(10.dp))
@@ -436,6 +631,7 @@ fun ConfigPage(vm: AppViewModel, onOpenCoreLog: () -> Unit = {}) {
                     value = pasteText,
                     onValueChange = { pasteText = it },
                     label = { Text("YAML 内容") },
+                    shape = fieldShape,
                     modifier = Modifier.fillMaxWidth().height(220.dp),
                 )
             },

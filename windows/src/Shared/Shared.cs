@@ -6,7 +6,7 @@ namespace ClashDeckSetup;
 internal static class SetupMain
 {
     public const string AppName = "折跃";
-    public const string AppVersion = "2.6.15";
+    public const string AppVersion = "2.6.17";
     public const string AppId = "ClashDeck";
     public const string AppExe = "ClashDeck.exe";
     public const string Publisher = "自用构建";

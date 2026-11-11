@@ -9,59 +9,104 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Style="{StaticResource Card}" Padding="13,10" Margin="0,0,0,12">
+        <!-- 工具栏分两行：上行是"看什么"（标题 + 行数状态）与"怎么处理"（按钮），
+             下行是筛选条件与隐私开关。
+             挤一行放不下：搜索 220 + 级别 128 + 行数 102 + 保留 112 + 四个按钮 ≈ 990，
+             而最小窗口 980 的内容区只有约 718 —— 多出来的部分会被裁掉，
+             表现就是搜索框和「保留 7 天」只剩半截字。 -->
+        <Border Grid.Row="0" Style="{StaticResource Card}" Padding="13,11" Margin="0,0,0,12">
             <Grid>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="日志" Style="{StaticResource H2}" VerticalAlignment="Center" />
-                    <TextBlock x:Name="Tip" Style="{StaticResource Sub}" Margin="10,0,0,0" VerticalAlignment="Center"
-                               TextWrapping="Wrap" />
-                </StackPanel>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Grid Width="200">
+                <!-- 每行一个独立 Grid，各自占满内容宽。
+                     不用 ColumnSpan 跨列：旁边是 Auto 列时，跨列元素的期望宽度会被分摊进列宽，
+                     实测右侧「记录连接」被挤出卡片边界约 20px，末字被裁。 -->
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- 第一行左：标题与当前窗口状态 -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal"
+                                VerticalAlignment="Center" Margin="1,0,12,0">
+                        <TextBlock Text="日志" Style="{StaticResource H2}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="Tip" Style="{StaticResource Sub}" Margin="10,0,0,0" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+
+                    <!-- 第一行右：动作按钮 -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="BtnPause" Content="暂停滚动" Style="{StaticResource Btn}" Height="32"
+                                Click="Pause_Click" />
+                        <Button Content="清空" Style="{StaticResource Btn}" Height="32" Margin="8,0,0,0"
+                                Click="Clear_Click" />
+                        <Button x:Name="BtnExport" Content="导出" Style="{StaticResource Btn}" Height="32"
+                                Margin="8,0,0,0" Click="Export_Click" />
+                        <Button x:Name="BtnOpenDir" Content="日志文件" Style="{StaticResource Btn}" Height="32"
+                                Margin="8,0,0,0" Click="OpenLogDir_Click" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- 第二行：筛选条件（左）与隐私开关（右）。
+                     搜索框用弹性列：宽窗口时跟着变宽，不至于在中间留出一大片空白；
+                     最窄收到 200（最小窗口下也放得下），最宽 420（再宽就成一条长条了）。 -->
+                <Grid Grid.Row="1" Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <!-- 3:1 不是随手写的：两个等分 * 列会让搜索框只拿到一半剩余空间（实测 228），
+                             而右侧那几个字只需要一小段留白。 -->
+                        <ColumnDefinition Width="3*" MinWidth="200" MaxWidth="420" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="1*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid Grid.Column="0">
                         <TextBox x:Name="Search" TextChanged="Search_TextChanged" />
                         <TextBlock Text="过滤关键字（空格分隔）" FontSize="12" Foreground="{DynamicResource Fg3}"
                                    Margin="11,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
-                                   x:Name="SearchHint" />
+                                   TextTrimming="CharacterEllipsis" x:Name="SearchHint" />
                     </Grid>
-                    <ComboBox x:Name="Level" Width="140" Margin="8,0,0,0" SelectionChanged="Level_SelectionChanged">
+                    <ComboBox Grid.Column="1" x:Name="Level" Width="128" Margin="8,0,0,0" SelectionChanged="Level_SelectionChanged">
                         <ComboBoxItem Content="全部" Tag="all" IsSelected="True" />
                         <ComboBoxItem Content="只看内核" Tag="core" />
                         <ComboBoxItem Content="只看连接" Tag="conn" />
                         <ComboBoxItem Content="只看面板" Tag="sys" />
                         <ComboBoxItem Content="只看 warn/error" Tag="warn" />
                     </ComboBox>
-                    <Button x:Name="BtnPause" Content="暂停滚动" Style="{StaticResource Btn}" Height="32"
-                            Margin="8,0,0,0" Click="Pause_Click" />
-                    <Button Content="清空" Style="{StaticResource Btn}" Height="32" Margin="8,0,0,0"
-                            Click="Clear_Click" />
-                    <Button x:Name="BtnExport" Content="导出" Style="{StaticResource Btn}" Height="32"
-                            Margin="8,0,0,0" Click="Export_Click" />
-                    <Button x:Name="BtnOpenDir" Content="日志文件" Style="{StaticResource Btn}" Height="32"
-                            Margin="8,0,0,0" Click="OpenLogDir_Click" />
-                    <CheckBox x:Name="SwLogConn" Style="{StaticResource Toggle}" Margin="12,0,0,0"
-                              VerticalAlignment="Center" Click="LogConn_Click"
-                              ToolTip="关闭后不再记录你访问过哪些域名（日志里只保留内核输出与面板动作）" />
-                    <TextBlock Text="记录连接" Style="{StaticResource Sub}" Margin="6,0,0,0"
-                               VerticalAlignment="Center" />
-                </StackPanel>
+                    <ComboBox Grid.Column="2" x:Name="WindowBox" Width="102" Margin="8,0,0,0" SelectionChanged="WindowBox_SelectionChanged"
+                              ToolTip="页面只保留最近这么多行，更早的自动滚出去。只影响界面，不动磁盘日志。">
+                        <ComboBoxItem Content="500 行" Tag="500" />
+                        <ComboBoxItem Content="1000 行" Tag="1000" />
+                        <ComboBoxItem Content="2000 行" Tag="2000" IsSelected="True" />
+                        <ComboBoxItem Content="5000 行" Tag="5000" />
+                    </ComboBox>
+                    <ComboBox Grid.Column="3" x:Name="Retention" Width="112" Margin="8,0,0,0" SelectionChanged="Retention_SelectionChanged"
+                              ToolTip="磁盘日志保留多久：到期的旧文件自动删除；选「永不删除」就一份都不清。">
+                        <ComboBoxItem Content="保留 7 天" Tag="7" IsSelected="True" />
+                        <ComboBoxItem Content="保留 30 天" Tag="30" />
+                        <ComboBoxItem Content="永不删除" Tag="0" />
+                    </ComboBox>
+
+                    <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
+                        <CheckBox x:Name="SwLogConn" Style="{StaticResource Toggle}" VerticalAlignment="Center"
+                                  Click="LogConn_Click"
+                                  ToolTip="关闭后不再记录你访问过哪些域名（日志里只保留内核输出与面板动作）" />
+                        <TextBlock Text="记录连接" Style="{StaticResource Sub}" Margin="6,0,0,0"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
             </Grid>
         </Border>
 
         <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0">
             <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <!-- 日志显示冻结提示：Tip 那格被搜索框挤得只剩十几个字，放不下"怎么办"，
-                     所以整行提示放在正文上方（宽度够、且贴着日志本体更醒目）。 -->
-                <Border x:Name="FreezeTip" Grid.Row="0" Background="{DynamicResource WarnSoft}"
-                        Padding="14,8" Visibility="Collapsed">
-                    <TextBlock x:Name="FreezeTipText" FontSize="11.5" TextWrapping="Wrap"
-                               Foreground="{DynamicResource Warn}" />
-                </Border>
-                <RichTextBox x:Name="LogBox" Grid.Row="1" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                <RichTextBox x:Name="LogBox" Grid.Row="0" IsReadOnly="True" BorderThickness="0" Background="Transparent"
                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                              FontFamily="{StaticResource MonoFont}" FontSize="11.5" Padding="14,12"
                              IsDocumentEnabled="False" SizeChanged="LogBox_SizeChanged" />

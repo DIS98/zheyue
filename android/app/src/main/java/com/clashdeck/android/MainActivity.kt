@@ -15,11 +15,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -58,9 +61,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.clashdeck.android.ui.AppViewModel
 import com.clashdeck.android.ui.pages.ConfigPage
@@ -219,11 +224,8 @@ private fun AppRoot(vm: AppViewModel, onRequestStart: () -> Unit) {
             // 却把六个标签横向摊开一号字大小的目标，反而不如竖排。
             if (!showingConfig && !wide) {
                 Column {
-                    // 用一条极淡的分隔线代替 elevation：深色下 elevation 会泛白，线更稳
-                    HorizontalDivider(
-                        thickness = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                    )
+                    // 去掉分隔线：底栏 surface、页面 background，两档色差已经够分界。
+                    // 一条 1dp 的线在浅色下是硬边，和整页的柔和过渡打架。
                     NavigationBar(
                         containerColor = MaterialTheme.colorScheme.surface,
                         tonalElevation = 0.dp,
@@ -304,6 +306,22 @@ private fun AppRoot(vm: AppViewModel, onRequestStart: () -> Unit) {
                         else -> ConfigPage(vm, onOpenCoreLog = { logMode = 1; tab = 4 })
                     }
                 }
+                // 顶层 16dp 渐变：滚动时卡片从标题下方淡出，不再露出半截白色圆角。
+                // zIndex 必须给：AnimatedContent 的过渡会给内容抬 zIndex，仅靠声明顺序盖不住。
+                Box(
+                    Modifier
+                        .zIndex(2f)
+                        .fillMaxWidth()
+                        .height(16.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.background,
+                                    MaterialTheme.colorScheme.background.copy(alpha = 0f),
+                                ),
+                            ),
+                        ),
+                )
             }
         }
     }

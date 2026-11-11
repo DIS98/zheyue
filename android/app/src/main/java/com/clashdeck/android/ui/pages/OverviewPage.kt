@@ -61,6 +61,7 @@ import com.clashdeck.android.ui.components.KvRow
 import com.clashdeck.android.ui.components.SectionCard
 import com.clashdeck.android.ui.components.UpdateBanner
 import com.clashdeck.android.ui.theme.DownColor
+import com.clashdeck.android.ui.theme.LocalCardBorder
 import com.clashdeck.android.ui.theme.UpColor
 import com.clashdeck.android.util.expiryLabel
 import com.clashdeck.android.util.formatBytes
@@ -86,7 +87,7 @@ fun OverviewPage(vm: AppViewModel, onRequestStart: () -> Unit) {
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // 有新版时置顶：这是用户最需要看到的一件事，不该藏在配置页里
         UpdateBanner(vm)
@@ -243,8 +244,11 @@ private fun StatusCard(
     val scale by animateFloatAsState(if (pressed) 0.94f else 1f, label = "powerScale")
 
     Surface(
-        shape = RoundedCornerShape(28.dp),
+        // 主状态卡比普通卡（20dp）大一档，但不拉到 28——28 与 20 同屏时会被读成两套圆角体系
+        shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface,
+        // 五张卡里唯独主卡原先没有描边：深色下 surface 与 background 只差 1.14:1，边界会消失
+        border = BorderStroke(1.dp, LocalCardBorder.current),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(

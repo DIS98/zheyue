@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.clashdeck.android.ui.theme.LocalCardBorder
 
 @Composable
 fun SectionCard(
@@ -41,10 +42,13 @@ fun SectionCard(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+        // 描边走 cardBorder 而不是 outline：浅色下 outline 已提到 3:1 给输入框用，
+        // 拿来画卡片会变成硬框；而 outline.copy(alpha=0.45) 又几乎不可见（1.6:1），这就是「贴纸感」的来源。
+        border = BorderStroke(1.dp, LocalCardBorder.current),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        // 内边距 20 > 卡片间距 16：相邻卡片之间的缝要窄于卡片内留白，否则两张卡会读成一组
+        Column(Modifier.padding(20.dp)) {
             if (title != null) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -103,7 +107,8 @@ fun KvRow(label: String, value: String, valueColor: Color = MaterialTheme.colorS
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            // 行间 6dp（上下各 3）：4dp 时多行 kv 会挤成一整块，跟正文分不开
+            .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -111,6 +116,8 @@ fun KvRow(label: String, value: String, valueColor: Color = MaterialTheme.colorS
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium,
+            // 数值比标签重半档：同一行里先看到的是数，不是字段名
+            fontWeight = FontWeight.Medium,
             color = valueColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
