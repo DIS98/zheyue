@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using ClashDeck.Core;
 
@@ -14,6 +15,12 @@ namespace ClashDeck.Views
         private readonly MainWindow _owner;
         private Snap _last;
         private string _profileSig = "";
+
+        // 订阅自动更新：本地缓存用于"输入非法时回滚"和"避免同值重复提交"。
+        // 后端字段还没落时保持 null，界面提示「—」，绝不把"读不到"画成"关"。
+        private int _subMinutes = 720;
+        private bool? _subAutoEnabled;
+        private string _subStateSig = "";
 
         public ProfilesView(MainWindow owner)
         {
@@ -237,6 +244,120 @@ namespace ClashDeck.Views
             SwAutoCore.IsChecked = s.Env.AutoStartCore;
             SwAutoProxy.IsChecked = s.Env.AutoStartProxy;
             SwAutostart.IsChecked = s.Env.Autostart;
+
+            FillSubAuto(s);
+        }
+
+        // ============================================================ 订阅自动更新
+
+        private void FillSubAuto(Snap s)
+        {
+            var env = s.Env;
+            if (env.SubAutoEnabled.HasValue) SwSubAuto.IsChecked = env.SubAutoEnabled.Value;
+            // 读不到时保留上一次渲染值，但明确写出「—」，不让未知冒充"关"
+            SubAutoTip.Text = env.SubAutoEnabled.HasValue ? "对所有订阅配置生效" : "自动更新设置 —（后端未返回）";
+
+            _subMinutes = env.SubIntervalMinutes;
+            if (!IsEditing(SubIntervalMinutes)) SubIntervalMinutes.Text = _subMinutes.ToString();
+
+            var st = env.SubAutoState;
+            var sig = (st.HasData
+                ? st.LastCheckAt + "|" + st.LastSuccessAt + "|" + st.LastError + "|"
+                  + st.FailCount + "|" + st.Pending + "|" + st.InFlight
+                : "none") + "|" + env.SubAutoEnabled;
+            if (sig == _subStateSig) return;
+            _subStateSig = sig;
+
+            BtnSubCheckNow.IsEnabled = !st.Checking;
+            SubAutoState.Inlines.Clear();
+            if (!st.HasData)
+            {
+                SubAutoState.Inlines.Add(new Run("最近检查：— · 最近成功：—"));
+                return;
+            }
+            SubAutoState.Inlines.Add(new Run("最近检查：" + (st.LastCheckAt > 0 ? Fmt.Ago(st.LastCheckAt) : "—")));
+            SubAutoState.Inlines.Add(new Run(" · 最近成功：" + (st.LastSuccessAt > 0 ? Fmt.Ago(st.LastSuccessAt) : "—")));
+            if (st.Checking)
+                SubAutoState.Inlines.Add(new Run(" · 正在检查…") { Foreground = Res("Accent") });
+            // lastError 是后端脱敏后的文本：原样显示，界面不再加工也不截断语义
+            if (!string.IsNullOrEmpty(st.LastError))
+            {
+                SubAutoState.Inlines.Add(new Run(" · 上次失败：" + st.LastError) { Foreground = Res("Bad") });
+                if (st.FailCount > 1)
+                    SubAutoState.Inlines.Add(new Run("（连续 " + st.FailCount + " 次）") { Foreground = Res("Fg2") });
+            }
+            else if (st.FailCount > 0)
+            {
+                SubAutoState.Inlines.Add(new Run(" · 连续失败 " + st.FailCount + " 次（原因未提供）"));
+            }
+        }
+
+        private async void SwSubAuto_Click(object sender, RoutedEventArgs e)
+        {
+            var want = SwSubAuto.IsChecked == true;
+            SwSubAuto.IsEnabled = false;
+            try
+            {
+                var j = await Api.Post("/api/settings", Json.Obj("subAutoEnabled", want));
+                if (!j.B("ok"))
+                {
+                    SwSubAuto.IsChecked = !want;
+                    _owner.ShowToast(j.S("msg") ?? "设置失败", false);
+                    return;
+                }
+                _subAutoEnabled = want;
+                _owner.ShowToast(want ? "已开启订阅自动更新" : "已关闭订阅自动更新", true);
+            }
+            finally { SwSubAuto.IsEnabled = true; }
+            await _owner.RefreshNow();
+        }
+
+        private async void SubIntervalMinutes_LostFocus(object sender, RoutedEventArgs e)
+        {
+            var txt = (SubIntervalMinutes.Text ?? "").Trim();
+            int m;
+            if (!int.TryParse(txt, out m) || m < 1 || m > 10080)
+            {
+                SubIntervalMinutes.Text = _subMinutes.ToString();
+                SubIntervalMinutes.BorderBrush = (Brush)FindResource("Bad");
+                SubIntervalMinutes.ToolTip = "检查间隔需在 1–10080 分钟之间";
+                _owner.ShowToast("检查间隔需在 1–10080 分钟之间", false);
+                return;
+            }
+            SubIntervalMinutes.ClearValue(Border.BorderBrushProperty);
+            SubIntervalMinutes.ToolTip = null;
+            if (m == _subMinutes) return;
+
+            var j = await Api.Post("/api/settings", Json.Obj("subIntervalMinutes", m));
+            if (!j.B("ok"))
+            {
+                _owner.ShowToast(j.S("msg") ?? "设置失败", false);
+                SubIntervalMinutes.Text = _subMinutes.ToString();
+                return;
+            }
+            _subMinutes = m;
+            _owner.ShowToast("检查间隔已设为 " + m + " 分钟", true);
+            await _owner.RefreshNow();
+        }
+
+        private async void SubCheckNow_Click(object sender, RoutedEventArgs e)
+        {
+            var old = BtnSubCheckNow.Content;
+            BtnSubCheckNow.IsEnabled = false;
+            BtnSubCheckNow.Content = "检查中";
+            try
+            {
+                // 后端还没落这个接口时会拿到 {ok:false,msg:...}，按失败提示即可，不崩
+                var j = await Api.CheckSubscriptionsNow();
+                _owner.ShowToast(j.S("msg") ?? (j.B("ok") ? "检查完成" : "检查失败"), j.B("ok"));
+            }
+            catch (Exception ex) { _owner.ShowToast("检查失败：" + ex.Message, false); }
+            finally
+            {
+                BtnSubCheckNow.Content = old ?? "立刻检查";
+                BtnSubCheckNow.IsEnabled = true;
+            }
+            await _owner.RefreshNow();
         }
 
         private bool IsEditing(TextBox tb) => tb != null && tb.IsKeyboardFocusWithin;
@@ -252,12 +373,6 @@ namespace ClashDeck.Views
             if (cb.Items.Count > 0 && cb.SelectedItem == null) cb.SelectedIndex = 0;
         }
 
-        private static int TagOf(ComboBox cb)
-        {
-            if (cb.SelectedItem is ComboBoxItem it && it.Tag is string t && int.TryParse(t, out var v)) return v;
-            return 0;
-        }
-
         // ============================================================ 订阅导入
 
         private async void SubImport_Click(object sender, RoutedEventArgs e)
@@ -265,10 +380,11 @@ namespace ClashDeck.Views
             var url = (SubUrl.Text ?? "").Trim();
             if (url.Length == 0) { _owner.ShowToast("先填订阅地址", false); return; }
 
+            // 更新间隔已提升为全局设置（配置页「订阅自动更新」），导入时不再传旧的
+            // intervalHours 档位——否则每导入一份订阅都会用旧档位覆盖刚设好的分钟间隔。
             var j = await Api.Post("/api/profiles/fetch", Json.Obj(
                 "name", (SubName.Text ?? "").Trim(),
-                "url", url,
-                "intervalHours", TagOf(SubInterval)), 60000);
+                "url", url), 60000);
 
             _owner.ShowToast(j.S("msg") ?? (j.B("ok") ? "已导入" : "失败"), j.B("ok"));
             if (j.B("ok"))

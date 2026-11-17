@@ -290,7 +290,9 @@ namespace ClashDeck.Views
             SideState.Text = state;
             SideState.Foreground = (Brush)FindResource(s.CoreRunning ? "Fg" : "Fg2");
 
-            var g = s.Groups.Count > 0 ? s.Groups[0] : null;
+            // 与概览「当前出口」共用同一取组规则（Snap.ExitGroup），否则侧栏会拿
+            // Groups[0]=GLOBAL(now=DIRECT)，同一屏出现两个互相矛盾的出口。
+            var g = s.ExitGroup();
             // 侧栏和代理页必须用同一套显示规则，否则同一个节点在这里是空白、在那里是 JP
             SideNode.Text = g != null && !string.IsNullOrEmpty(g.Now) ? Fmt.NormalizeFlags(g.Now) : "—";
             SideNode.ToolTip = g != null ? g.Now : "";
@@ -643,7 +645,8 @@ namespace ClashDeck.Views
 
             string state = !s.CoreRunning ? "内核未运行"
                 : $"运行中 v{s.CoreVersion} · {s.Conns} 连接";
-            var g = s.Groups.Count > 0 ? s.Groups[0] : null;
+            // 托盘菜单的「当前节点」与侧栏、概览共用同一出口规则，避免出现第三个 DIRECT
+            var g = s.ExitGroup();
             string node = g != null && !string.IsNullOrEmpty(g.Now) ? Fmt.NormalizeFlags(g.Now) : "—";
 
             string proxy = "";
@@ -706,7 +709,10 @@ namespace ClashDeck.Views
 
         private async Task RefreshDelayTray()
         {
-            var g = _snap.Groups.Count > 0 ? _snap.Groups[0] : null;
+            // 与侧栏、概览、托盘菜单共用同一取组规则（Snap.ExitGroup）。
+            // 旧写法 Groups[0] 拿到的是 GLOBAL(Selector, now=DIRECT)，规则模式下它不生效，
+            // 于是托盘"测速"测的是一个根本没在用的组——这是第四处分叉，现收口到同一来源。
+            var g = _snap.ExitGroup();
             if (g == null) return;
             Paths.WriteLog("tray delay start " + g.Name);
             var j = await Api.Get("/api/proxies/delay?group=" + Api.Q(g.Name) + "&timeout=5000", 60000);

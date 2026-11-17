@@ -220,13 +220,20 @@
             <Setter.Value>
                 <ControlTemplate TargetType="CheckBox">
                     <Border x:Name="track" Width="40" Height="22" CornerRadius="11"
-                            Background="{DynamicResource Track}">
+                            Background="{DynamicResource Track}"
+                            BorderBrush="{DynamicResource TrackBorder}" BorderThickness="1">
                         <Ellipse x:Name="knob" Width="16" Height="16" Fill="{DynamicResource Knob}"
                                  HorizontalAlignment="Left" Margin="3,0,0,0" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="track" Property="Background" Value="{DynamicResource Accent}" />
+                            <!-- 打开态用 Accent 同色描边：整颗开关是一块实心强调色，
+                                 不出现灰边把填充切断；BorderThickness 保持 1，避免几何跳变。 -->
+                            <Setter TargetName="track" Property="BorderBrush" Value="{DynamicResource Accent}" />
+                            <!-- 打开态旋钮强制白：浅色关闭态旋钮是深灰(Fg3)，若沿用会压在蓝底上看不清。
+                                 白 on 浅色 Accent(#2F6BFF)=4.50:1、on 深色 Accent(#5C8BFF)=3.19:1，均 ≥3。 -->
+                            <Setter TargetName="knob" Property="Fill" Value="White" />
                             <Setter TargetName="knob" Property="HorizontalAlignment" Value="Right" />
                             <Setter TargetName="knob" Property="Margin" Value="0,0,3,0" />
                         </Trigger>

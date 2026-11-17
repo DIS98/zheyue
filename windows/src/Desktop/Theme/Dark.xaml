@@ -11,7 +11,10 @@
 
     <SolidColorBrush x:Key="Fg"          Color="#E9EBEF" />
     <SolidColorBrush x:Key="Fg2"         Color="#A6ADB8" />
-    <SolidColorBrush x:Key="Fg3"         Color="#737B88" />
+    <!-- Fg3 是辅助/三级文字（Sub 样式、占位提示、图表标注），11~12px 属正文级，
+         需在 Panel(#191C22) 上达到 WCAG AA 4.5:1：#848C99 = 5.03:1（原 #737B88 仅 4.00:1）。
+         仍明显暗于 Fg2(#A6ADB8, 7.55:1)，不抢正文层级。 -->
+    <SolidColorBrush x:Key="Fg3"         Color="#848C99" />
 
     <SolidColorBrush x:Key="Accent"      Color="#5C8BFF" />
     <SolidColorBrush x:Key="Accent2"     Color="#8AA8FF" />
@@ -24,7 +27,10 @@
     <SolidColorBrush x:Key="Bad"         Color="#F87171" />
     <SolidColorBrush x:Key="BadSoft"     Color="#3A1A1A" />
 
+    <!-- 开关关闭态的轨道轮廓：需在 Panel(#191C22) 上达到非文本控件 3:1。
+         Track(#3B424E) 本身只有 1.69:1，单靠填充色看不见轨道边界，故用 1px 描边。 -->
     <SolidColorBrush x:Key="Track"       Color="#3B424E" />
+    <SolidColorBrush x:Key="TrackBorder" Color="#626B7A" />
     <SolidColorBrush x:Key="Knob"        Color="#E9EBEF" />
     <SolidColorBrush x:Key="OnWhite"     Color="#0B0D11" />
 

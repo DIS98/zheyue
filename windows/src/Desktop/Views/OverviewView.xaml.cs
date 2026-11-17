@@ -83,7 +83,7 @@ namespace ClashDeck.Views
                 // "曲线空了但上下行停在旧值""日志页挂着陈旧的 N 行"这类半新半旧。
                 ConnCount.Text = "—";
                 _updating = true;
-                try { UpdateBanner(s); UpdateSysProxy(s); }
+                try { UpdateBanner(s); UpdateSysProxy(s); UpdateCurrentExit(s); }
                 finally { _updating = false; }
                 return;
             }
@@ -97,6 +97,7 @@ namespace ClashDeck.Views
                 UpdateKv(s);
                 UpdateSwitches(s);
                 UpdateGroup(s);
+                UpdateCurrentExit(s);
             }
             finally { _updating = false; }
         }
@@ -193,6 +194,38 @@ namespace ClashDeck.Views
                 ("节点数", s.Groups.Count > 0 ? s.Groups[0].All.Count + " 个" : "—"));
         }
 
+        /// <summary>
+        /// 当前出口 = 规则真正指向的组 + 它现在选中的节点 + 该节点延迟（对齐安卓端的语义）。
+        /// 取组规则与侧栏共用 Snap.ExitGroup()（节点选择 → 非 GLOBAL 的 Selector → Groups[0]），
+        /// 两处不再各写一份；显示的仍是实际组名，绝不冒称"节点选择"。
+        /// 读不到一律「—」，延迟为空才是「未测」——两者不是一回事。
+        /// </summary>
+        private void UpdateCurrentExit(Snap s)
+        {
+            ExitGroup.Text = "—";
+            ExitNode.Text = "—";
+            ExitNode.ToolTip = null;
+            ExitDelay.Text = "—";
+            ExitDelay.Foreground = Res("Fg2");
+            if (!s.Trusted) return;   // 失联：快照里的一切都不可信，不显示旧节点
+
+            var g = s.ExitGroup();          // 与侧栏同一来源，避免同一屏出现两个出口
+            if (g == null) return;
+
+            ExitGroup.Text = g.Name;
+            var node = Fmt.NormalizeFlags(g.Now ?? "");
+            ExitNode.Text = string.IsNullOrEmpty(node) ? "—" : node;
+            ExitNode.ToolTip = string.IsNullOrEmpty(g.Now) ? null : g.Now;
+
+            double delay = 0;
+            if (!string.IsNullOrEmpty(g.Now) && g.Delays.TryGetValue(g.Now, out var d)) delay = d;
+            if (delay == 0) delay = g.DelayOfNow;   // 兜底：后端已算好的当前节点延迟
+
+            ExitDelay.Text = delay < 0 ? "超时" : delay > 0 ? Fmt.Delay(delay) : "未测";
+            // 未测/读不到是中性态，不染成失败红；测过才按快中慢分档上色
+            ExitDelay.Foreground = Res(delay > 0 ? Delay.BrushKey(Delay.Of(delay)) : "Fg2");
+        }
+
         private void FillKv(Panel host, params (string k, string v)[] rows)
         {
             host.Children.Clear();
@@ -229,8 +262,6 @@ namespace ClashDeck.Views
             SwTun.IsChecked = s.Env.TunEnable;
             SwEnhanced.IsChecked = s.Env.EnhancedRules;
             ApplyProxyModeUi(s.Env.ProxyMode);
-            _lastInterval = s.Env.SubIntervalHours;
-            if (!TxtSubInterval.IsFocused) TxtSubInterval.Text = _lastInterval.ToString();
 
             var mode = s.Mode ?? "";
             if (mode != _modeSig)
@@ -803,27 +834,6 @@ namespace ClashDeck.Views
             }
             catch (Exception ex) { SpeedResult.Text = "测速失败：" + ex.Message; }
             finally { BtnDown.IsEnabled = true; BtnUp.IsEnabled = true; }
-        }
-
-        // ---- 订阅自动更新间隔 ----
-        private int _lastInterval = 24;
-
-        private async void SubInterval_LostFocus(object sender, RoutedEventArgs e)
-        {
-            if (_updating) return;
-            var txt = (TxtSubInterval.Text ?? "").Trim();
-            int h;
-            if (!int.TryParse(txt, out h) || h < 0 || h > 168)
-            {
-                _owner.ShowToast("间隔需在 0–168 之间（0 = 不自动更新）", false);
-                TxtSubInterval.Text = _lastInterval.ToString();
-                return;
-            }
-            if (h == _lastInterval) return;
-            var j = await Api.Post("/api/settings", Json.Obj("subIntervalHours", h));
-            if (!j.B("ok")) { _owner.ShowToast(j.S("msg") ?? "设置失败", false); TxtSubInterval.Text = _lastInterval.ToString(); return; }
-            _lastInterval = h;
-            _owner.ShowToast(h == 0 ? "已关闭订阅自动更新" : "订阅每 " + h + " 小时自动更新", true);
         }
 
         private string _curProxyMode = "smart";

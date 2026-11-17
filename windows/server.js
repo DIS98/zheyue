@@ -27,6 +27,119 @@ const HISTORY_FILE = path.join(DATA, 'history.jsonl');
 const DEFAULT_TEST_URL = 'https://www.gstatic.com/generate_204';
 
 /**
+ * 限并发跑一批异步任务，最多同时 limit 个。
+ *
+ * 组测速原来是 Promise.all 全并发：34 个节点同一瞬间拨号，本地出口与机场的
+ * 并发上限先把排在后面的连接掐掉，测出来一片 5000ms 或空白。实测同一批节点
+ * 串行单测都在 100~250ms —— 测速方法把节点测死了，不是节点死了。
+ */
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  const n = Math.min(Math.max(1, limit), items.length);
+  await Promise.all(Array.from({ length: n }, worker));
+  return out;
+}
+
+/**
+ * 信息节点判据，移植自 Android 端 `util/NodeFilter.kt`（2026-11-04）。
+ * 命中订阅状态关键词**且**带冒号或数字才算。第二个条件用来放过
+ * 「香港 剩余专线」这类把关键词当卖点的真节点。
+ */
+const INFO_NODE_KEYWORDS = [
+  '剩余', '已用', '到期', '过期', '有效期', '重置', '距离', '套餐',
+  '官网', '网址', '客服', '群组', '公告', '订阅', '余量',
+];
+function isInfoNode(name) {
+  const n = String(name || '').trim();
+  if (!n) return false;
+  if (!INFO_NODE_KEYWORDS.some((k) => n.includes(k))) return false;
+  return /[:：]|\d/.test(n);
+}
+
+/**
+ * 从运行时配置里删掉信息节点：proxies 段整块删，proxy-groups 里的引用同步删。
+ * 只在测速层剔除不够 —— 内核仍看得到它们，url-test 仍会把假节点选成 now。
+ * 安全阀：某个组整组都是信息节点时保留原样，筛成空组内核会直接报错起不来。
+ */
+function stripInfoNodes(text) {
+  const lines = String(text).split('\n');
+  const removed = new Set();
+
+  const stage = [];
+  let inP = false;
+  let pBlock = [];
+  // 订阅里的列表项起点不总是 "- name:"，常见 "- flow: xtls-rprx-vision" 后跟
+  // 2 空格缩进的 "name:"。按"无缩进的 - 开头"切块，再从块里找 name。
+  const flushP = () => {
+    if (!pBlock.length) return;
+    let nm = '';
+    for (const l of pBlock) {
+      const m = /^(?:-\s*| {2})name\s*:\s*(.*?)\s*$/.exec(l);
+      if (m) { nm = m[1].replace(/^['"]|['"]$/g, ''); break; }
+    }
+    if (nm && isInfoNode(nm)) removed.add(nm);
+    else stage.push(...pBlock);
+    pBlock = [];
+  };
+  for (const l of lines) {
+    if (/^proxies\s*:/.test(l)) { inP = true; flushP(); stage.push(l); continue; }
+    if (inP && /^[^\s#]/.test(l) && !/^-/.test(l)) { inP = false; flushP(); stage.push(l); continue; }
+    if (inP && /^-\s+\S/.test(l)) { flushP(); pBlock.push(l); continue; }
+    if (inP && pBlock.length) { pBlock.push(l); continue; }
+    stage.push(l);
+  }
+  flushP();
+
+  const out = [];
+  let inG = false;
+  let block = null;
+  const flush = () => {
+    if (!block) return;
+    const refs = [];
+    block.forEach((l, i) => {
+      const m = /^  -\s*(.*?)\s*$/.exec(l);
+      if (m) refs.push({ i, name: m[1].replace(/^['"]|['"]$/g, '') });
+    });
+    const hits = refs.filter((r) => removed.has(r.name));
+    if (refs.length && hits.length === refs.length) out.push(...block);
+    else {
+      const skip = new Set(hits.map((h) => h.i));
+      block.forEach((l, i) => { if (!skip.has(i)) out.push(l); });
+    }
+    block = null;
+  };
+  for (const l of stage) {
+    if (/^proxy-groups\s*:/.test(l)) { inG = true; flush(); out.push(l); continue; }
+    if (!inG) { out.push(l); continue; }
+    if (/^-\s*name\s*:/.test(l)) { flush(); block = [l]; continue; }
+    if (/^[^\s#]/.test(l) && !/^-/.test(l)) { flush(); inG = false; out.push(l); continue; }
+    if (block) block.push(l); else out.push(l);
+  }
+  flush();
+  return out.join('\n');
+}
+
+/**
+ * 组测速只测真节点：内置策略、策略组、机场公告项都不算。
+ *
+ * 公告项多带国旗前缀（"🇦🇱 剩余流量：99.9 GB"），不能用 ^ 锚定开头，
+ * 否则旧规则匹配不到，测出来一个假节点 216ms 的绿色延迟。
+ */
+function testableProxyNames(all, groups) {
+  const groupNames = new Set((groups || []).map((g) => g.name));
+  const builtins = new Set(['DIRECT', 'REJECT', 'direct', 'reject']);
+  return (all || []).filter((n) =>
+    !builtins.has(n) && !groupNames.has(n) && !isInfoNode(n));
+}
+
+/**
  * 解析订阅返回的 subscription-userinfo。
  * 形如 upload=62; download=4989; total=137438953472; expire=1803472119
  * 注意：这是"拉订阅那一刻"的数值，不是实时用量。
@@ -74,6 +187,18 @@ function normalizeTestUrl(raw) {
   }
 }
 
+// ── 订阅自动更新（Windows 端对齐 Android 端语义）──
+// 间隔以分钟为单位，合法范围 1–10080（7 天）。旧配置用小时（subIntervalHours），读取时 ×60 迁移。
+const SUB_INTERVAL_MIN = 1;
+const SUB_INTERVAL_MAX = 10080;
+const SUB_INTERVAL_DEFAULT = 720;
+// 失败退避：15 → 30 → 60 → 120 → 240 → 360 分钟，成功后清零（对齐 Android SubscriptionAutoUpdate）。
+const SUB_BACKOFF_MINUTES = [15, 30, 60, 120, 240, 360];
+// inFlight 超过 3 分钟视为陈旧（进程被强杀时标记残留），与 Android 端一致。
+const SUB_INFLIGHT_STALE_MS = 180000;
+// 自动更新的全局状态单独落盘，避免污染 subscriptions.json 的「文件名 → 元数据」结构。
+const SUB_STATE_FILE = path.join(DATA, 'sub-auto-state.json');
+
 const DEFAULT_SETTINGS = {
   corePath: path.join(__dirname, 'core', 'verge-mihomo.exe'),
   geoSourceDir: path.join(__dirname, 'core', 'resources'),
@@ -90,7 +215,9 @@ const DEFAULT_SETTINGS = {
   autoStartCore: false,
   autoStartProxy: false,
   autoDelayMinutes: 0,
-  subIntervalHours: 24,
+  subIntervalHours: 24,          // 旧字段：保留以便兼容读写，读取时按 ×60 迁移为 subIntervalMinutes
+  subAutoEnabled: true,          // 默认沿用旧的 intervalHours>0 行为（24>0 → 开启）
+  subIntervalMinutes: SUB_INTERVAL_DEFAULT,
   testUrl: DEFAULT_TEST_URL,
   delayTimeout: 5000,
   enhancedRules: true,   // 用本地规则集替换订阅自带的规则（关掉则完全沿用订阅）
@@ -171,11 +298,19 @@ function portConflictMsg(a, b, value, body) {
  */
 let portFallback = null;
 
+/** 把任意输入收敛到订阅间隔的合法区间 [1, 10080]，非法回落默认值 */
+function clampSubInterval(v) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return SUB_INTERVAL_DEFAULT;
+  return Math.min(SUB_INTERVAL_MAX, Math.max(SUB_INTERVAL_MIN, n));
+}
+
 function loadSettings() {
   let s;
+  let rawCfg = null;
   try {
-    const raw = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    s = { ...DEFAULT_SETTINGS, ...raw };
+    rawCfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    s = { ...DEFAULT_SETTINGS, ...rawCfg };
   } catch (e) {
     // 以前这里静默回退默认值：用户只会发现"设置怎么全没了"，且无法追溯。
     // 现在把坏文件留成 .bad-<时间戳>，并写 startup-error.log。
@@ -230,6 +365,28 @@ function loadSettings() {
     const local = path.join(__dirname, 'core', 'resources');
     if (fs.existsSync(local)) s.geoSourceDir = local;
   }
+
+  // 订阅自动更新迁移（前后端契约，主理人裁定）：
+  //   分钟字段合法(整数 1–10080) → 以分钟为准，即使旧的 subIntervalHours 还在也不换算；
+  //   分钟字段缺失或越界 → 才用旧 subIntervalHours×60（>0 开启；0 关闭，沿用旧的 0=不自动更新）；
+  //   全新安装（两者都没有）→ 默认 720 分钟 / 开启。绝不能用 DEFAULT 的 subIntervalHours=24 去 ×60，
+  //   否则默认会变成 1440。
+  // subAutoEnabled 是独立字段：显式写过布尔值就永远尊重它，不受小时迁移影响。
+  const rawMin = rawCfg ? Number(rawCfg.subIntervalMinutes) : NaN;
+  const minutesValid = Number.isInteger(rawMin) && rawMin >= SUB_INTERVAL_MIN && rawMin <= SUB_INTERVAL_MAX;
+  const hasEnabled = !!(rawCfg && typeof rawCfg.subAutoEnabled === 'boolean');
+  const hasOldHours = !!(rawCfg && rawCfg.subIntervalHours !== undefined && Number.isFinite(Number(rawCfg.subIntervalHours)));
+  if (!minutesValid) {
+    if (hasOldHours) {
+      const oldH = Number(rawCfg.subIntervalHours);
+      s.subIntervalMinutes = oldH > 0 ? clampSubInterval(oldH * 60) : SUB_INTERVAL_DEFAULT;
+      if (!hasEnabled) s.subAutoEnabled = oldH > 0;
+    } else {
+      s.subIntervalMinutes = SUB_INTERVAL_DEFAULT;
+    }
+  }
+  s.subIntervalMinutes = clampSubInterval(s.subIntervalMinutes);
+  if (typeof s.subAutoEnabled !== 'boolean') s.subAutoEnabled = true;
   return s;
 }
 function saveSettings(s) {
@@ -289,6 +446,81 @@ function readSubs() {
 function writeSubs(s) {
   // 同 saveSettings：订阅元数据损坏等于丢订阅，必须原子写
   atomicWrite(SUBS_FILE, JSON.stringify(s, null, 2));
+}
+
+// ---------------------------------------------------------------- 订阅自动更新状态
+// 与 Android 端 SubUpdateState 对齐：持久化 lastCheckAt / lastSuccessAt / lastError /
+// failCount / pending；inFlight 用内存时间戳推算（进程被杀不会残留「正在检查」卡死界面）。
+const SUB_STATE_EMPTY = {
+  lastCheckAt: 0,
+  lastSuccessAt: 0,
+  lastError: null,
+  failCount: 0,
+  pending: false,
+};
+let subInFlightAt = 0;   // 0 = 空闲；否则是本次刷新开始的时间戳
+let subRefreshChain = Promise.resolve();  // 与 withGate 独立：保证「同一时刻只有一个刷新」
+
+function readSubAutoState() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SUB_STATE_FILE, 'utf8'));
+    return {
+      lastCheckAt: Number(raw.lastCheckAt) || 0,
+      lastSuccessAt: Number(raw.lastSuccessAt) || 0,
+      lastError: typeof raw.lastError === 'string' ? raw.lastError : null,
+      failCount: Math.max(0, Math.min(SUB_BACKOFF_MINUTES.length, Number(raw.failCount) || 0)),
+      pending: !!raw.pending,
+    };
+  } catch { return { ...SUB_STATE_EMPTY }; }
+}
+function writeSubAutoState(st) {
+  // 只落盘持久字段，inFlight / enabled / intervalMinutes 由 settings 与内存实时算。
+  const clean = {
+    lastCheckAt: Number(st.lastCheckAt) || 0,
+    lastSuccessAt: Number(st.lastSuccessAt) || 0,
+    lastError: typeof st.lastError === 'string' ? st.lastError : null,
+    failCount: Math.max(0, Math.min(SUB_BACKOFF_MINUTES.length, Number(st.failCount) || 0)),
+    pending: !!st.pending,
+  };
+  try { atomicWrite(SUB_STATE_FILE, JSON.stringify(clean, null, 2)); } catch { /* 状态写失败不影响主流程 */ }
+}
+/** inFlight 超过 3 分钟视为陈旧（进程被强杀时的残留），界面不能永远「正在检查」 */
+function subIsInFlight() {
+  return subInFlightAt > 0 && (Date.now() - subInFlightAt) >= 0
+    && (Date.now() - subInFlightAt) <= SUB_INFLIGHT_STALE_MS;
+}
+/** 失败次数 → 退避分钟：15 → 30 → 60 → 120 → 240 → 360 */
+function subBackoffMinutes(failCount) {
+  const step = Math.max(1, Math.min(SUB_BACKOFF_MINUTES.length, Number(failCount) || 1));
+  return SUB_BACKOFF_MINUTES[step - 1];
+}
+/**
+ * 单个订阅的有效间隔（分钟）。优先级：
+ *   逐订阅新字段 subIntervalMinutes > 逐订阅旧字段 intervalHours(×60) > 全局 settings.subIntervalMinutes。
+ * 保留逐订阅档位兼容，旧配置 6/12/24/72 小时照常工作。
+ */
+function subEffectiveInterval(meta) {
+  if (meta && Number.isFinite(Number(meta.subIntervalMinutes)) && Number(meta.subIntervalMinutes) > 0) {
+    return clampSubInterval(meta.subIntervalMinutes);
+  }
+  if (meta && Number.isFinite(Number(meta.intervalHours)) && Number(meta.intervalHours) > 0) {
+    return clampSubInterval(Number(meta.intervalHours) * 60);
+  }
+  return clampSubInterval(settings.subIntervalMinutes);
+}
+/** 下发给 /api/env 的完整自动更新状态 */
+function subAutoPublicState() {
+  const st = readSubAutoState();
+  return {
+    enabled: !!settings.subAutoEnabled,
+    intervalMinutes: clampSubInterval(settings.subIntervalMinutes),
+    lastCheckAt: st.lastCheckAt,
+    lastSuccessAt: st.lastSuccessAt,
+    lastError: st.lastError,
+    failCount: st.failCount,
+    pending: st.pending,
+    inFlight: subIsInFlight(),
+  };
 }
 
 // ---------------------------------------------------------------- 串行闸门
@@ -400,37 +632,153 @@ function humanizeCoreError(detail) {
   return '配置校验没通过：' + tail;
 }
 
-async function updateSubscriptionInner(file) {
+/**
+ * 把网络层异常 message 翻成脱敏中文分类。
+ * fetch / undici 的错误 message 常带完整订阅 URL（含 token/分享码），绝不能原样进日志或 state。
+ * 只输出本函数生成的固定中文分类。
+ */
+function subNetworkError(e) {
+  const msg = String((e && e.message) || e || '');
+  if (/\bHTTP\s*(\d{3})\b/i.test(msg)) return '订阅返回 HTTP ' + (msg.match(/\bHTTP\s*(\d{3})\b/i)[1]);
+  if (/timeout|abort|超时|timed out/i.test(msg)) return '连接超时';
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|域名|ENODATA/i.test(msg)) return '域名解析失败';
+  if (/ECONNREFUSED|refused|拒绝/i.test(msg)) return '连接被拒绝';
+  if (/ECONNRESET|socket hang|network|fetch failed|网络/i.test(msg)) return '网络连接失败';
+  return '下载或校验失败';
+}
+
+/**
+ * 执行一次订阅检查（下载 + 比对 + 按需写盘与热重载）。
+ * opts.auto=true 时表示自动定时触发（会走 enabled/due/退避判定，见 subScheduler）；
+ * 手动 /api/subscriptions/update 与 /api/subscriptions/check-now 直接调用，不做 due 判定。
+ *
+ * 返回：{ ok, changed, reloaded, msg, meta }。
+ * changed=false 表示内容逐字未变：不写原文、不重建 runtime、不 PUT /configs。
+ */
+async function updateSubscriptionInner(file, opts) {
+  const options = opts || {};
   const subs = readSubs();
   const meta = subs[file];
-  if (!meta || !meta.url) return { ok: false, msg: '这份配置没有订阅地址（不是订阅导入的）' };
+  if (!meta || !meta.url) return { ok: false, changed: false, reloaded: false, msg: '这份配置没有订阅地址（不是订阅导入的）' };
   const target = path.join(PROFILES, file);
-  try {
-    const got = await fetchProfileText(meta.url);
-    if (!got.ok) throw new Error(got.msg);
-    const text = got.text;
-    const old = fs.existsSync(target) ? fs.readFileSync(target) : null;
-    if (old) fs.writeFileSync(target + '.bak', old);
-    atomicWrite(target, text);
-    meta.lastUpdate = Date.now();
-    meta.lastStatus = 'ok';
-    const nodeTxt = got.nodes > 0 ? `${got.nodes} 个节点` : '用 provider 提供节点';
-    meta.lastMsg = `${(text.length / 1024).toFixed(1)} KB · ${nodeTxt}`;
-    meta.lastUa = got.ua;
-    meta.userinfo = got.userinfo || meta.userinfo || '';
-    writeSubs(subs);
-    pushLog('sys', `订阅更新成功 ${file}（${meta.lastMsg}，UA=${got.ua}）`);
-    if (settings.activeProfile === file) await reloadRuntimeInner();
-    return { ok: true, msg: `已更新 ${file}（${meta.lastMsg}）`, meta };
-  } catch (e) {
+  const now = Date.now();
+
+  // 本次检查记账：成功失败都写 lastCheckAt；成功清零 failCount，失败 +1 并挂 pending。
+  const markCheck = (errText, success) => {
+    const st = readSubAutoState();
+    st.lastCheckAt = now;
+    if (success) {
+      st.lastSuccessAt = now;
+      st.lastError = null;
+      st.failCount = 0;
+      st.pending = false;
+    } else {
+      st.lastError = errText || '下载或校验失败';
+      st.failCount = Math.min(SUB_BACKOFF_MINUTES.length, (Number(st.failCount) || 0) + 1);
+      st.pending = true;
+    }
+    writeSubAutoState(st);
+  };
+  const markFail = (reason) => {
     meta.lastStatus = 'fail';
-    meta.lastMsg = e.message;
-    meta.lastTry = Date.now();
+    meta.lastMsg = reason;          // 只存脱敏分类，不存原始异常（可能带 URL/token）
+    meta.lastTry = now;
     meta.failCount = (Number(meta.failCount) || 0) + 1;
     writeSubs(subs);
-    pushLog('sys', `订阅更新失败 ${file}: ${e.message}`);
-    return { ok: false, msg: '更新失败：' + e.message };
+    markCheck(reason, false);
+    pushLog('sys', `订阅检查失败（${reason}）`);
+    return { ok: false, changed: false, reloaded: false, msg: reason };
+  };
+
+  // ① 下载。网络层异常走脱敏分类，绝不外抛原始 message。
+  let got;
+  try {
+    got = await fetchProfileText(meta.url);
+  } catch (e) {
+    return markFail(subNetworkError(e));
   }
+  if (!got.ok) {
+    // got.msg 是本模块生成的中文引导文案（fetchProfileText），不含 URL/token。
+    // 过一遍 redactLine 做二次保险，并截短到分类句，避免长文案刷进日志。
+    const reason = redactLine(got.msg).split('。')[0];
+    return markFail(reason);
+  }
+
+  // ② 内容逐字比对：与磁盘上的订阅原文比，未变则不写盘、不动内核。
+  const text = got.text;
+  let old = null;
+  try { if (fs.existsSync(target)) old = fs.readFileSync(target, 'utf8'); } catch { old = null; }
+  const changed = old !== text;
+
+  // ③ 无论变没变，都刷新时间戳与流量信息（这些是元数据，不是订阅原文）。
+  meta.lastUpdate = now;
+  meta.lastStatus = 'ok';
+  meta.lastUa = got.ua;
+  meta.userinfo = got.userinfo || meta.userinfo || '';
+  const nodeTxt = got.nodes > 0 ? `${got.nodes} 个节点` : '用 provider 提供节点';
+  meta.lastMsg = `${(text.length / 1024).toFixed(1)} KB · ${nodeTxt}`;
+  meta.failCount = 0;
+
+  if (!changed) {
+    writeSubs(subs);
+    markCheck(null, true);
+    pushLog('sys', '订阅检查完成：内容未变，跳过写盘与热重载');
+    return { ok: true, changed: false, reloaded: false, msg: '内容未变', meta };
+  }
+
+  // ④ 内容有变：备份旧文件 + 原子写新原文
+  try {
+    if (old !== null) fs.writeFileSync(target + '.bak', old, 'utf8');
+    atomicWrite(target, text);
+  } catch (e) {
+    meta.lastStatus = 'fail';
+    meta.lastMsg = '订阅文件写入失败';
+    meta.lastTry = now;
+    meta.failCount = (Number(meta.failCount) || 0) + 1;
+    writeSubs(subs);
+    markCheck('订阅文件写入失败', false);
+    pushLog('sys', '订阅写盘失败（订阅文件写入失败）');
+    return { ok: false, changed: false, reloaded: false, msg: '订阅文件写入失败' };
+  }
+
+  writeSubs(subs);
+  markCheck(null, true);
+
+  // ⑤ 只有内容变更才尝试热重载。reloadRuntimeInner 走 PUT /configs，不 stop/start，
+  //    不会拆掉正在连的代理；非激活配置不需要重载（下次激活时自然生效）。
+  const isActive = settings.activeProfile === file;
+  let reloaded = !isActive;   // 非激活配置无需重载，记为 true；激活配置以实际 PUT /configs 结果为准
+  if (isActive) {
+    const r = await reloadRuntimeInner();
+    reloaded = !!r.ok;
+    if (!reloaded) pushLog('sys', '订阅已更新，但热加载未成功（将在下次启动内核时生效）');
+  }
+  const reloadNote = !isActive ? '（非当前配置，暂不热加载）' : (reloaded ? '并热加载' : '');
+  pushLog('sys', `订阅更新成功：内容已变更${reloadNote}（${meta.lastMsg}）`);
+  return { ok: true, changed: true, reloaded, msg: `已更新（${meta.lastMsg}）`, meta };
+}
+
+/**
+ * 订阅刷新的唯一入口：串行链 + inFlight 去重 + 与内核启停排队。
+ * 同一时刻只允许一个刷新在跑；链保证串行，inFlight 给界面显示忙碌态并挡住重复触发。
+ */
+function refreshSubscription(file, opts) {
+  if (subIsInFlight()) {
+    return Promise.resolve({ ok: true, skipped: true, msg: '已有订阅检查在进行中', state: subAutoPublicState() });
+  }
+  const run = subRefreshChain.then(async () => {
+    if (subIsInFlight()) {
+      return { ok: true, skipped: true, msg: '已有订阅检查在进行中', state: subAutoPublicState() };
+    }
+    subInFlightAt = Date.now();
+    try {
+      return await withGate(() => updateSubscriptionInner(file, opts));
+    } finally {
+      subInFlightAt = 0;
+    }
+  });
+  subRefreshChain = run.then(() => {}, () => {});
+  return run;
 }
 
 /** 订阅更新要跟内核启停排队，否则刚拉下来的配置会跟启动中的内核抢 config.yaml */
@@ -438,25 +786,28 @@ function updateSubscription(file) {
   return withGate(() => updateSubscriptionInner(file));
 }
 
-/** 每 10 分钟检查一次，到期才真正拉取 */
+/** 每分钟 tick 一次；到期才真正拉取（间隔按分钟），失败走 15→30→60→120→240→360 退避 */
 function subScheduler() {
+  if (!settings.subAutoEnabled) return;
+  if (subIsInFlight()) return;
   const subs = readSubs();
   const now = Date.now();
   for (const [file, meta] of Object.entries(subs)) {
     if (!meta.url) continue;
-    const hours = Number(meta.intervalHours || settings.subIntervalHours || 0);
-    if (!hours || hours <= 0) continue;
-    const due = !meta.lastUpdate || now - meta.lastUpdate >= hours * 3600 * 1000;
-    if (!due) continue;
-    // 失败退避：订阅地址失效时以前每 10 分钟重试一次，日志里一直刷失败。
-    // 按 1/2/4/8/16 分钟递增，最慢 16 分钟一次。
-    const failCount = Math.min(Number(meta.failCount) || 0, 4);
-    const backoff = (failCount ? Math.pow(2, failCount - 1) : 0) * 60 * 1000;
-    if (backoff && meta.lastTry && now - meta.lastTry < backoff) continue;
-    updateSubscription(file);
+    const ivlMs = subEffectiveInterval(meta) * 60 * 1000;
+    if (!meta.lastUpdate || now - Number(meta.lastUpdate) < ivlMs) continue;
+    // 逐订阅退避：失败次数 1..6 → 15/30/60/120/240/360 分钟
+    const failCount = Math.min(Number(meta.failCount) || 0, SUB_BACKOFF_MINUTES.length);
+    if (failCount > 0) {
+      const backoff = subBackoffMinutes(failCount) * 60 * 1000;
+      if (meta.lastTry && now - Number(meta.lastTry) < backoff) continue;
+    }
+    // 每轮只启动一个（内部 inFlight/chain 保证串行），其余下一分钟再判
+    refreshSubscription(file, { auto: true });
+    break;
   }
 }
-setInterval(subScheduler, 10 * 60 * 1000);
+setInterval(subScheduler, 60 * 1000);
 setTimeout(subScheduler, 60 * 1000);
 
 // ---------------------------------------------------------------- 定时测速
@@ -2329,7 +2680,9 @@ function buildRuntimeConfig() {
     '  auto-detect-interface: true',
   ].join('\n');
   const cfgPath = path.join(RUNTIME, 'config.yaml');
-  const content = header + '\n' + body;
+  // 信息节点在配置层就删：内核看不到，url-test 候选池里才不会有必然超时的假节点。
+  // 放在所有替换之后、落盘之前，前面对订阅原文的处理不受影响。
+  const content = stripInfoNodes(header + '\n' + body);
   let prev = null;
   try { prev = fs.readFileSync(cfgPath, 'utf8'); } catch { /* 首次生成 */ }
   if (prev !== content) atomicWrite(cfgPath, content);
@@ -2859,6 +3212,10 @@ async function buildEnv(opts) {
     // 规则集加载情况（A7）。内核没跑 / 还没查过时是 null，界面据此"没有就不显示"。
     // 正常时字段存在且 ok:true —— 界面要用它显示"分流规则 15/15 已加载"这类正向信息。
     rulesOk,
+    // 订阅自动更新：配置 + 运行时状态，一次下发。界面据此渲染开关、间隔输入与「正在检查/上次结果」。
+    subAutoEnabled: !!settings.subAutoEnabled,
+    subIntervalMinutes: clampSubInterval(settings.subIntervalMinutes),
+    subAutoState: subAutoPublicState(),
   };
   // 端口配置被回落过才有这个键。没有就不出现（不是空对象/空串）——
   // 界面按"字段在不在"决定要不要提示，避免重演 configRecovered 那种"空串常驻"。
@@ -2889,7 +3246,7 @@ async function snapshot() {
     profiles: readProfiles(),
     env: {
       ...(await buildEnv({ freshProxy: false })),
-      subIntervalHours: settings.subIntervalHours,
+      subIntervalHours: Math.round(clampSubInterval(settings.subIntervalMinutes) / 60 * 10) / 10,
       autostart: autostartEnabled(),
       speedTestUrl: settings.speedTestUrl,
       speedUploadUrl: settings.speedUploadUrl,
@@ -3049,8 +3406,36 @@ async function handleApi(req, res, url) {
   }
   if (p === '/api/subscriptions/update' && req.method === 'POST') {
     const body = (await readJsonBody(req)).body || {};
-    const r = await updateSubscription(body.file);
+    // 走统一入口：与内核启停排队 + inFlight 去重 + 记账。手动更新等待结果返回。
+    const r = await refreshSubscription(body.file, { force: true });
     return sendJson(res, r.ok ? 200 : 500, r);
+  }
+  if (p === '/api/subscriptions/check-now' && req.method === 'POST') {
+    // 立刻检查一次：触发异步刷新但不等待下载完成，马上返回当前状态，避免长时间阻塞界面。
+    // 已有刷新在跑时不重复触发（inFlight 去重在 refreshSubscription 内也有二次校验）。
+    const body = (await readJsonBody(req)).body || {};
+    // 界面按契约发空 body {}。优先当前配置，没激活时回落到第一份带订阅地址的配置，
+    // 否则会静默触发一个 file='' 的检查、界面却显示「已开始检查」却永远没结果。
+    let file = body.file || settings.activeProfile;
+    if (!file) {
+      const subs = readSubs();
+      file = Object.keys(subs).find((f) => subs[f] && subs[f].url) || '';
+    }
+    const before = subAutoPublicState();
+    if (before.inFlight) {
+      return sendJson(res, 200, { ok: true, triggered: false, msg: '已有检查在进行中', state: before });
+    }
+    if (!file) {
+      return sendJson(res, 200, { ok: false, triggered: false, msg: '没有可检查的订阅', state: before });
+    }
+    // fire-and-forget：刷新在后台跑，结果写进 state；.catch 防未处理拒绝。
+    refreshSubscription(file, { force: true }).catch(() => { /* 结果已记入 state */ });
+    return sendJson(res, 200, {
+      ok: true,
+      triggered: true,
+      msg: '已开始检查',
+      state: { ...before, inFlight: true },
+    });
   }
 
   if (p === '/api/settings' && req.method === 'GET') {
@@ -3112,7 +3497,8 @@ async function handleApi(req, res, url) {
       }
     }
 
-    for (const k of ['corePath', 'webPort', 'mixedPort', 'socksPort', 'httpPort', 'controllerPort', 'allowLan', 'geoSourceDir', 'subIntervalHours']) {
+    // subIntervalHours 已收归下方统一处理（兼容旧写入 → 转成分钟），不在这里裸赋值。
+    for (const k of ['corePath', 'webPort', 'mixedPort', 'socksPort', 'httpPort', 'controllerPort', 'allowLan', 'geoSourceDir']) {
       if (body[k] !== undefined) settings[k] = body[k];
     }
     if (typeof body.tunEnable === 'boolean') settings.tunEnable = body.tunEnable;
@@ -3176,17 +3562,38 @@ async function handleApi(req, res, url) {
         ? '日志保留策略：永不删除（只受磁盘剩余空间限制）'
         : `日志保留策略：最近 ${d} 天${removed ? `（已清理 ${removed} 个旧文件）` : ''}`);
     }
-    if (body.subIntervalHours !== undefined) {
+    // —— 订阅自动更新 ——
+    // 新的分钟字段优先；旧的 subIntervalHours 写入兼容：×60 转成分钟，0 表示关闭。
+    let subIvlChanged = false;
+    if (body.subIntervalMinutes !== undefined) {
+      const m = Number(body.subIntervalMinutes);
+      if (!Number.isInteger(m) || m < SUB_INTERVAL_MIN || m > SUB_INTERVAL_MAX) {
+        return sendJson(res, 400, { ok: false, msg: `订阅更新间隔需在 ${SUB_INTERVAL_MIN}–${SUB_INTERVAL_MAX} 分钟之间` });
+      }
+      settings.subIntervalMinutes = m;
+      subIvlChanged = true;
+    } else if (body.subIntervalHours !== undefined) {
       const h = Number(body.subIntervalHours);
-      if (!(h >= 0 && h <= 168)) return sendJson(res, 400, { ok: false, msg: '订阅更新间隔需在 0–168 小时之间（0 = 不自动更新）' });
-      settings.subIntervalHours = Math.round(h);
-      // 订阅元数据里的 intervalHours 优先级更高，这里一并改写，
-      // 否则"设置成 24 小时"会被旧值悄悄覆盖（这正是之前一直显示 6 小时的原因）。
+      if (!Number.isFinite(h) || h < 0 || h > 168) {
+        return sendJson(res, 400, { ok: false, msg: '订阅更新间隔需在 0–168 小时之间（0 = 不自动更新）' });
+      }
+      settings.subIntervalHours = Math.round(h);   // 旧字段留档，便于回滚
+      settings.subIntervalMinutes = h > 0 ? clampSubInterval(h * 60) : SUB_INTERVAL_DEFAULT;
+      if (typeof body.subAutoEnabled !== 'boolean') settings.subAutoEnabled = h > 0;
+      subIvlChanged = true;
+    }
+    if (typeof body.subAutoEnabled === 'boolean') {
+      settings.subAutoEnabled = body.subAutoEnabled;
+    }
+    // 分钟设置变更时同步写进每份订阅的新字段，并清掉旧 intervalHours，
+    // 否则旧的小时档位会在 subEffectiveInterval 里盖住新的全局设置。
+    if (subIvlChanged) {
       const subs = readSubs();
       let touched = 0;
       for (const f of Object.keys(subs)) {
         if (!subs[f] || !subs[f].url) continue;
-        subs[f].intervalHours = settings.subIntervalHours;
+        subs[f].subIntervalMinutes = settings.subIntervalMinutes;
+        delete subs[f].intervalHours;
         touched++;
       }
       if (touched) writeSubs(subs);
@@ -3224,9 +3631,10 @@ async function handleApi(req, res, url) {
       atomicWrite(path.join(PROFILES, file), text);
       const remain = r.headers.get('subscription-userinfo') || '';
       const subs = readSubs();
+      // 新订阅不带逐订阅覆盖字段，使用全局分钟设置即可（subEffectiveInterval 会回落到全局）。
+      // 不再写 intervalHours，避免旧小时档位在新制式下被误当成覆盖值。
       subs[file] = {
         url: body.url,
-        intervalHours: Number(body.intervalHours || settings.subIntervalHours || 24),
         lastUpdate: Date.now(),
         lastStatus: 'ok',
         lastMsg: `${(text.length / 1024).toFixed(1)} KB`,
@@ -3325,12 +3733,14 @@ async function handleApi(req, res, url) {
     const snap = await snapshot();
     const g = snap.groups.find((x) => x.name === group);
     if (!g) return sendJson(res, 404, { ok: false, msg: '分组不存在' });
-    const results = await Promise.all(g.all.slice(0, 60).map(async (n) => {
+    // 只测真节点，且限 4 路并发。全并发会把可用节点误判成超时（实测 8 个里 6 个误判）。
+    const targets = testableProxyNames(g.all, snap.groups).slice(0, 60);
+    const results = await mapLimit(targets, 4, async (n) => {
       const r = await apiJson('GET', `/proxies/${encodeURIComponent(n)}/delay?timeout=${timeout}&url=${encodeURIComponent(target)}`);
       const delay = r.ok ? (r.data && r.data.delay) : 0;
       recordDelay(n, delay);
       return { name: n, delay: delay || null };
-    }));
+    });
     return sendJson(res, 200, { ok: true, url: target, results });
   }
 
@@ -3403,6 +3813,8 @@ async function handleApi(req, res, url) {
           testUrl: settings.testUrl,
           delayTimeout: settings.delayTimeout,
           subIntervalHours: settings.subIntervalHours,
+          subAutoEnabled: settings.subAutoEnabled,
+          subIntervalMinutes: settings.subIntervalMinutes,
           autoStartCore: settings.autoStartCore,
           autoStartProxy: settings.autoStartProxy,
           autoDelayMinutes: settings.autoDelayMinutes,
@@ -3442,6 +3854,15 @@ async function handleApi(req, res, url) {
       }
       for (const k of ['autoStartCore', 'autoStartProxy', 'tunEnable', 'allowLan']) {
         if (typeof bundle.settings[k] === 'boolean') settings[k] = bundle.settings[k];
+      }
+      // 订阅自动更新：新字段优先；只有旧小时档位时按 ×60 迁移。
+      if (Number.isFinite(Number(bundle.settings.subIntervalMinutes))) {
+        settings.subIntervalMinutes = clampSubInterval(bundle.settings.subIntervalMinutes);
+      } else if (Number(bundle.settings.subIntervalHours) > 0) {
+        settings.subIntervalMinutes = clampSubInterval(Number(bundle.settings.subIntervalHours) * 60);
+      }
+      if (typeof bundle.settings.subAutoEnabled === 'boolean') {
+        settings.subAutoEnabled = bundle.settings.subAutoEnabled;
       }
       settings.testUrl = normalizeTestUrl(settings.testUrl) || DEFAULT_TEST_URL;
       saveSettings(settings);

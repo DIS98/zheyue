@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -153,6 +154,9 @@ namespace ClashDeck.Core
         public static Task<JObj> Backup() => Get("/api/backup", 20000);
         public static Task<JObj> Subscriptions() => Get("/api/subscriptions", 6000);
 
+        /// <summary>立刻检查所有订阅。后端字段未就绪时可能返回 404，调用方按 ok:false 降级提示。</summary>
+        public static Task<JObj> CheckSubscriptionsNow() => Post("/api/subscriptions/check-now", null, 120000);
+
         // ------------------------------------------------------------ 强类型快照
 
         public static async Task<Snap> SnapshotModel()
@@ -225,6 +229,21 @@ namespace ClashDeck.Core
         public int Used;
     }
 
+    /// <summary>
+    /// 订阅自动更新的运行状态（env.subAutoState）。
+    /// HasData=false 表示后端还没落这个对象 —— 界面必须显示「—」，不能把 0 当成"从没检查过"。
+    /// 时间戳口径：毫秒 epoch（与 Fmt.Ago / 订阅元数据 lastUpdate 一致）。
+    /// </summary>
+    public sealed class SubAutoStateInfo
+    {
+        public bool HasData;
+        public double LastCheckAt, LastSuccessAt;
+        public string LastError = "";
+        public int FailCount;
+        public bool Pending, InFlight;
+        public bool Checking => Pending || InFlight;
+    }
+
     public sealed class EnvInfo
     {
         public bool TunEnable, HasSysProxyTool, Autostart, AutoStartCore, AutoStartProxy;
@@ -235,6 +254,15 @@ namespace ClashDeck.Core
         public string TestUrl = "";
         public int DelayTimeout = 5000;
         public bool IsAdmin;
+
+        // ---------------------------------------------------------------- 订阅自动更新
+        /// <summary>null = 后端还没这个字段。三态：不能把"读不到"渲染成"关"。</summary>
+        public bool? SubAutoEnabled;
+        /// <summary>分钟，1–10080。后端未落该字段时由 SubIntervalHours × 60 迁移而来。</summary>
+        public int SubIntervalMinutes = 720;
+        /// <summary>true = 后端直接给了分钟值；false = 值来自旧档位换算。</summary>
+        public bool HasSubIntervalMinutes;
+        public SubAutoStateInfo SubAutoState = new SubAutoStateInfo();
         /// <summary>配置文件读不出来被换掉时，这里是备份文件名（如 config.json.bad-1762…）；否则空串。</summary>
         public string ConfigRecovered = "";
 
@@ -280,6 +308,20 @@ namespace ClashDeck.Core
 
         public ProfileInfo Active =>
             Profiles.Find(p => string.Equals(p.File, ActiveProfile, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
+        /// 规则真正指向的出口组：优先精确匹配「节点选择」，其次第一个非 GLOBAL 的 Selector，
+        /// 最后才退化到 Groups[0]（此时确实没有更合适的组，至少各处显示一致）。
+        ///
+        /// 侧栏节点与概览「当前出口」必须共用这一个方法。以前两处各写一份取法，
+        /// 侧栏拿到 Groups[0]=GLOBAL(now=DIRECT)，概览拿到「节点选择」=KR Korea 01，
+        /// 同一屏出现两个出口——这类矛盾只能靠单一来源根治。
+        /// </summary>
+        public GroupInfo ExitGroup() =>
+            Groups.FirstOrDefault(x => x.Name == "节点选择")
+            ?? Groups.FirstOrDefault(x => !string.Equals(x.Name, "GLOBAL", StringComparison.OrdinalIgnoreCase)
+                                       && string.Equals(x.Type, "Selector", StringComparison.OrdinalIgnoreCase))
+            ?? (Groups.Count > 0 ? Groups[0] : null);
 
         /// <summary>
         /// 三态取值：字段不存在 或 值为 null → <c>null</c>（"读不到"），否则取布尔值。
@@ -372,6 +414,36 @@ namespace ClashDeck.Core
                 ConfigRecovered = env.S("configRecovered") ?? "",
             };
             if (string.IsNullOrEmpty(s.Env.ProxyMode)) s.Env.ProxyMode = "smart";
+
+            // ------------------------------------------------------------ 订阅自动更新
+            // 旧档位 subIntervalHours（0/6/12/24/72）乘 60 迁移为分钟；两边都有时以分钟为准，
+            // 绝不双重换算（24 小时 ×60=1440，再 migration 一次就是 86400，界面会直接判非法）。
+            // 后端可能把字段放在 env（buildEnv 展开，最常见），也可能放快照根上；两处都认。
+            var subSrc = (env.Has("subAutoEnabled") || env.Has("subIntervalMinutes") || env.Has("subAutoState"))
+                ? env : j;
+            s.Env.SubAutoEnabled = Tri(subSrc, "subAutoEnabled");
+            s.Env.HasSubIntervalMinutes = subSrc.Has("subIntervalMinutes") && subSrc.Get("subIntervalMinutes") != null;
+            var mins = subSrc.I("subIntervalMinutes");
+            if (!s.Env.HasSubIntervalMinutes || mins < 1 || mins > 10080)
+            {
+                var hours = subSrc.Has("subIntervalHours") ? subSrc.I("subIntervalHours") : env.I("subIntervalHours");
+                if (hours > 0 && hours * 60 <= 10080) mins = hours * 60;
+                else mins = s.Env.SubIntervalMinutes;   // 旧档位是 0（关闭）→ 保留默认分钟值，由开关表达"关"
+                if (hours <= 0 && !s.Env.SubAutoEnabled.HasValue) s.Env.SubAutoEnabled = false;
+            }
+            if (mins >= 1 && mins <= 10080) s.Env.SubIntervalMinutes = mins;
+
+            var sas = subSrc["subAutoState"];
+            if (sas.Exists && sas.Dict != null)
+            {
+                s.Env.SubAutoState.HasData = true;
+                s.Env.SubAutoState.LastCheckAt = sas.D("lastCheckAt");
+                s.Env.SubAutoState.LastSuccessAt = sas.D("lastSuccessAt");
+                s.Env.SubAutoState.LastError = sas.S("lastError") ?? "";
+                s.Env.SubAutoState.FailCount = sas.I("failCount");
+                s.Env.SubAutoState.Pending = sas.B("pending");
+                s.Env.SubAutoState.InFlight = sas.B("inFlight");
+            }
 
             // ------------------------------------------------------------ A 批新增字段
             // 全部按"有事就说、没有就不渲染"处理：后端没落字段 → 保持 null，界面不显示

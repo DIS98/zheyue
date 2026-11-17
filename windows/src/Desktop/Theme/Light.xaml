@@ -11,7 +11,9 @@
 
     <SolidColorBrush x:Key="Fg"          Color="#16181D" />
     <SolidColorBrush x:Key="Fg2"         Color="#5B626D" />
-    <SolidColorBrush x:Key="Fg3"         Color="#8B93A0" />
+    <!-- 辅助/三级文字需在白卡片 #FFFFFF 上达到 WCAG AA 4.5:1：
+         #6C7380 = 4.77:1（原 #8B93A0 仅 3.10:1）；仍浅于 Fg2(#5B626D, 6.15:1)，不抢层级。 -->
+    <SolidColorBrush x:Key="Fg3"         Color="#6C7380" />
 
     <SolidColorBrush x:Key="Accent"      Color="#2F6BFF" />
     <SolidColorBrush x:Key="Accent2"     Color="#6E8CFF" />
@@ -24,8 +26,14 @@
     <SolidColorBrush x:Key="Bad"         Color="#DC2626" />
     <SolidColorBrush x:Key="BadSoft"     Color="#FDECEC" />
 
+    <!-- 开关关闭态的轨道轮廓：需在白卡片 #FFFFFF 上达到非文本控件 3:1。
+         Track(#C9CFD9) 本身只有 1.57:1，故用 1px 描边勾出轨道边界。 -->
     <SolidColorBrush x:Key="Track"       Color="#C9CFD9" />
-    <SolidColorBrush x:Key="Knob"        Color="#FFFFFF" />
+    <SolidColorBrush x:Key="TrackBorder" Color="#8B93A0" />
+    <!-- 关闭态旋钮不能用白色：白 Knob on 浅灰 Track(#C9CFD9) 只有 1.57:1，融进轨道看不出。
+         改用 Fg3(#6C7380) = 3.05:1，达到非文本控件 3:1；与 Fg3 同色也保持灰阶语言统一。
+         打开态旋钮在 Controls.xaml 的 IsChecked trigger 里强制白色（白 on Accent 4.50:1）。 -->
+    <SolidColorBrush x:Key="Knob"        Color="#6C7380" />
     <SolidColorBrush x:Key="OnWhite"     Color="#FFFFFF" />
 
     <Color x:Key="ShadowColor">#18000000</Color>

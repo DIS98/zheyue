@@ -49,8 +49,6 @@
                                 <ColumnDefinition Width="12" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="124" />
-                                <ColumnDefinition Width="12" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
@@ -61,19 +59,63 @@
                                 <TextBlock Text="订阅地址" Style="{StaticResource Sub}" Margin="1,0,0,5" />
                                 <TextBox x:Name="SubUrl" />
                             </StackPanel>
-                            <StackPanel Grid.Column="4">
-                                <TextBlock Text="自动更新" Style="{StaticResource Sub}" Margin="1,0,0,5" />
-                                <ComboBox x:Name="SubInterval">
-                                    <ComboBoxItem Content="关闭" Tag="0" />
-                                    <ComboBoxItem Content="每 6 小时" Tag="6" />
-                                    <ComboBoxItem Content="每 12 小时" Tag="12" IsSelected="True" />
-                                    <ComboBoxItem Content="每 24 小时" Tag="24" />
-                                    <ComboBoxItem Content="每 72 小时" Tag="72" />
-                                </ComboBox>
-                            </StackPanel>
-                            <Button Grid.Column="6" Content="下载并导入" Style="{StaticResource BtnPrimary}"
+                            <Button Grid.Column="4" Content="下载并导入" Style="{StaticResource BtnPrimary}"
                                     Height="32" VerticalAlignment="Bottom" Click="SubImport_Click" />
                         </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- 订阅自动更新（全局设置，作用于所有订阅配置） -->
+                <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock Style="{StaticResource H2}" Text="订阅自动更新" />
+                            <TextBlock x:Name="SubAutoTip" Style="{StaticResource Sub}" HorizontalAlignment="Right"
+                                       Text="对所有订阅配置生效" />
+                        </Grid>
+
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="开启自动更新" FontSize="12.5" Foreground="{DynamicResource Fg}" />
+                                <TextBlock x:Name="SubAutoHint" Style="{StaticResource Sub}" Margin="0,2,0,0"
+                                           TextWrapping="Wrap" Text="到点自动检查全部订阅，检查中不会重复触发" />
+                            </StackPanel>
+                            <CheckBox x:Name="SwSubAuto" Grid.Column="1" Style="{StaticResource Toggle}"
+                                      VerticalAlignment="Center" Click="SwSubAuto_Click" />
+                        </Grid>
+
+                        <Border Style="{StaticResource Divider}" Margin="0,11" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Text="检查间隔（分钟）" FontSize="12.5" Foreground="{DynamicResource Fg}" />
+                                <TextBlock Style="{StaticResource Sub}" Margin="0,2,0,0" TextWrapping="Wrap"
+                                           Text="可填 1–10080（约 7 天）；非法值不会保存" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                                        Margin="0,0,14,0">
+                                <TextBox x:Name="SubIntervalMinutes" Width="92" TextAlignment="Center"
+                                         LostFocus="SubIntervalMinutes_LostFocus" />
+                                <TextBlock Text="分钟" Style="{StaticResource Sub}" Margin="7,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <Button x:Name="BtnSubCheckNow" Grid.Column="2" Content="立刻检查"
+                                    Style="{StaticResource Btn}" Height="30" VerticalAlignment="Center"
+                                    Click="SubCheckNow_Click" />
+                        </Grid>
+
+                        <TextBlock x:Name="SubAutoState" Margin="0,11,0,0" FontSize="11.5"
+                                   TextWrapping="Wrap" Foreground="{DynamicResource Fg2}"
+                                   Text="最近检查：— · 最近成功：—" />
                     </StackPanel>
                 </Border>
 
